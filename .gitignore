@@ -1,0 +1,17 @@
+# 敏感配置
+config.py
+
+# 截图输出
+screenshots/
+
+# Python
+__pycache__/
+*.pyc
+
+# 虚拟环境
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
