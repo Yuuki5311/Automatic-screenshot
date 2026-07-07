@@ -153,6 +153,7 @@ def main():
     print("[初始化] 启动 Chrome...")
     chrome_options = Options()
     chrome_options.add_argument(f"--window-size={BROWSER_WIDTH},{BROWSER_HEIGHT}")
+    chrome_options.add_argument("--force-device-scale-factor=1")
     # 如果 Chrome 未在 PATH 中，可取消下一行注释并指定路径
     # chrome_options.binary_location = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
