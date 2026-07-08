@@ -7,7 +7,6 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import queue
-import sys
 import time
 
 from gui.widgets.qr_display import QRDisplay
@@ -157,6 +156,8 @@ class App(tk.Tk):
 
     def _on_start(self):
         """点击启动按钮。"""
+        if self._worker_thread and self._worker_thread.is_alive():
+            return
         self._stop_event.clear()
         self._log_view.clear()
         self._show_page("progress")
@@ -178,7 +179,6 @@ class App(tk.Tk):
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=3)
         self.destroy()
-        sys.exit(0)
 
     # ------------------------------------------------------------------
     # 队列轮询
@@ -239,7 +239,6 @@ class App(tk.Tk):
         from game_launcher import launch_game
         from navigator import Navigator
         from screenshotter import Screenshotter
-        from popup_monitor import PopupMonitor
         import pyautogui
         import os
 
@@ -305,7 +304,7 @@ class App(tk.Tk):
 
             self._send({"type": "log", "text": "等待游戏窗口..."})
 
-            nav = Navigator(templates_dir=TEMPLATES_DIR)
+            nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
 
             def on_game_qr(image):
                 self._send({
@@ -334,14 +333,13 @@ class App(tk.Tk):
             # ====== 阶段 4: 截图（复用 main.py 逻辑） ======
             avatar_bounds = None
             nobility_bounds = None
-            enter_game_bounds = None
 
-            shot = Screenshotter(output_dir=os.path.join(SCREENSHOTS_DIR, "screenshots"))
+            shot = Screenshotter(output_dir=os.path.join(resource_path(SCREENSHOTS_DIR), "screenshots"))
 
             screen_w, screen_h = pyautogui.size()
+            # Intentional private attr access (avoids public API change to Navigator in this task)
             avatar_bounds = (0, 0, int(screen_w * nav._scale * 0.4), int(screen_h * nav._scale * 0.5))
             nobility_bounds = (0, 0, int(screen_w * nav._scale), int(screen_h * nav._scale * 0.5))
-            enter_game_bounds = (0, int(screen_h * nav._scale * 0.5), int(screen_w * nav._scale), int(screen_h * nav._scale * 0.5))
 
             # 截图任务（和 main.py 一致）
             screenshot_tasks = [
