@@ -291,9 +291,11 @@ class App(tk.Tk):
         from game_launcher import launch_game
         from navigator import Navigator
         from screenshotter import Screenshotter
+        from logger import get_logger
         import pyautogui
         import os
 
+        _log = get_logger()
         driver = None
         nav = None
 
@@ -303,11 +305,13 @@ class App(tk.Tk):
                 if self._stop_event.is_set():
                     return
 
+                _log.info("[阶段1] 开始腾讯先锋登录")
                 self._send({"type": "log", "text": "正在打开浏览器..."})
 
                 driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
 
                 login_type = self._login_type.get()
+                _log.info(f"[阶段1] 登录方式: {login_type}")
 
                 def on_qr(image):
                     self._send({
@@ -330,10 +334,12 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": f"开始腾讯先锋{'QQ' if login_type == 'qq' else '微信'}扫码登录..."})
 
                 if not web_login(driver, login_type, on_qr, on_status):
+                    _log.error("[阶段1] 腾讯先锋登录失败")
                     self._send({"type": "log", "text": "❌ 腾讯先锋登录失败", "level": "error"})
                     self._send({"type": "done", "text": "❌ 腾讯先锋登录失败"})
                     return
 
+                _log.info("[阶段1] 腾讯先锋登录成功")
                 self._platform_logged_in = True
                 self._send({"type": "page", "name": "progress"})
                 self._send({"type": "log", "text": "✅ 腾讯先锋登录成功", "level": "success"})
@@ -342,11 +348,15 @@ class App(tk.Tk):
                 if self._stop_event.is_set():
                     return
 
+                _log.info("[阶段2] 开始搜索游戏")
                 self._send({"type": "log", "text": "正在搜索王者荣耀..."})
                 if not launch_game(driver):
+                    _log.error("[阶段2] 搜索/启动游戏失败")
                     self._send({"type": "log", "text": "❌ 搜索/启动游戏失败", "level": "error"})
                     self._send({"type": "done", "text": "❌ 启动游戏失败"})
                     return
+
+                _log.info("[阶段2] 游戏启动完成")
 
                 self._send({"type": "log", "text": "✅ 已点击秒玩，等待游戏启动...", "level": "success"})
 
@@ -415,11 +425,14 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": text,
                             "level": "success" if "成功" in text else "info"})
 
+            _log.info(f"[阶段3] 开始游戏登录, platform={platform}")
             if not game_login(nav, platform, on_game_qr, on_game_status):
+                _log.error("[阶段3] 游戏登录失败")
                 self._send({"type": "log", "text": "❌ 游戏登录失败", "level": "error"})
                 self._send({"type": "done", "text": "❌ 游戏登录失败"})
                 return
 
+            _log.info("[阶段3] 游戏登录成功")
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
@@ -530,6 +543,7 @@ class App(tk.Tk):
 
         except Exception as e:
             import traceback
+            _log.exception(f"工作流异常: {e}")
             self._send({"type": "log", "text": f"异常: {e}", "level": "error"})
             self._send({"type": "done", "text": f"❌ 运行异常: {e}"})
             traceback.print_exc()
