@@ -1,33 +1,28 @@
 """截图捕获与保存模块。"""
 
 import os
-from selenium.webdriver.remote.webdriver import WebDriver
+import pyautogui
+from logger import get_logger
+
+log = get_logger()
 
 
 class Screenshotter:
-    """从浏览器当前画面截图并保存到本地。"""
+    """截取全屏画面并保存到本地。"""
 
-    def __init__(self, driver: WebDriver, output_dir: str = "screenshots"):
-        """
-        Args:
-            driver: Selenium WebDriver 实例。
-            output_dir: 截图输出目录。
-        """
-        self.driver = driver
-        self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+    def __init__(self, output_dir: str = "screenshots"):
+        self.output_dir = os.path.abspath(output_dir)
+        os.makedirs(self.output_dir, exist_ok=True)
+        log.info(f"截图输出目录: {self.output_dir}")
 
     def take(self, name: str) -> str:
-        """截取当前浏览器画面并保存。
-
-        Args:
-            name: 截图名称（不含扩展名），如 "主页", "英雄"。
-
-        Returns:
-            str: 保存的文件路径。
-        """
+        """截取当前全屏画面并保存。"""
         filename = f"{name}.png"
         filepath = os.path.join(self.output_dir, filename)
-        self.driver.save_screenshot(filepath)
-        print(f"[截图] 已保存: {filepath}")
+
+        img = pyautogui.screenshot()
+        img.save(filepath, "PNG")
+
+        size_kb = os.path.getsize(filepath) / 1024
+        log.info(f"已保存: {filepath} ({size_kb:.0f} KB)")
         return filepath

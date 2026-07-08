@@ -234,7 +234,7 @@ class App(tk.Tk):
     def _run_workflow(self):
         """后台线程：执行完整的登录 → 截图工作流。"""
         from browser import create_browser
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path
         from login import web_login, game_login
         from game_launcher import launch_game
         from navigator import Navigator
@@ -408,7 +408,7 @@ class App(tk.Tk):
                         break
 
                 if all_ok:
-                    time.sleep(3)  # PAGE_LOAD_WAIT
+                    time.sleep(PAGE_LOAD_WAIT)
                     shot.take(name)
                     success += 1
                     self._send({"type": "log", "text": f"  已截图: {name}", "level": "success"})
@@ -440,6 +440,9 @@ class App(tk.Tk):
             self._send({"type": "log", "text": f"异常: {e}", "level": "error"})
             self._send({"type": "done", "text": f"❌ 运行异常: {e}"})
             traceback.print_exc()
+        finally:
+            if driver is not None:
+                driver.quit()
 
     # ------------------------------------------------------------------
     # 启动

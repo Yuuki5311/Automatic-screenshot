@@ -12,6 +12,9 @@ import time
 from io import BytesIO
 from typing import Callable
 
+import cv2
+import numpy as np
+import pyautogui
 from PIL import Image
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -167,9 +170,7 @@ def web_login(
                     time.sleep(PAGE_LOAD_WAIT)
                     return True
             except Exception:
-                on_status("✅ 腾讯先锋登录成功")
-                time.sleep(PAGE_LOAD_WAIT)
-                return True
+                pass  # transient error, keep polling
 
         except Exception:
             pass
@@ -205,10 +206,6 @@ def game_login(
     Returns:
         bool: 登录成功返回 True。
     """
-    import cv2
-    import numpy as np
-    import pyautogui
-
     on_status("等待游戏加载并检测登录二维码...")
     time.sleep(8)  # 等游戏画面加载
 

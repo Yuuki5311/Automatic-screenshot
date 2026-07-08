@@ -30,7 +30,6 @@ TEMPLATES = [
     ("customize_icon.png",       "定制入口图标",                 "主界面下方"),
     ("nobility_icon.png",        "贵族图标",                     "主界面上方"),
     ("game_main.png",            "游戏主界面特征（截一小块有辨识度的区域）", "主界面任意位置"),
-    ("close_button.png",         "关闭 / X 按钮",                "任意弹窗右上角"),
     ("back_arrow.png",           "返回箭头",                     "页面左上角"),
 
     # ======== 个人主页 (先点击头像进入) ========

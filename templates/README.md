@@ -20,7 +20,6 @@
 | `customize_icon.png` | 定制入口图标 | 主界面下方 |
 | `nobility_icon.png` | 贵族图标 | 主界面上方 |
 | `game_main.png` | 游戏主界面特征 | 用于确认游戏已加载 |
-| `close_button.png` | 关闭/返回按钮 | 弹窗右上角通用 X |
 | `back_arrow.png` | 返回箭头 | 页面左上角通用返回 |
 
 ### 个人主页
