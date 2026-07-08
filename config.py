@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # 腾讯先锋云游戏
 # ---------------------------------------------------------------------------
-CLOUD_GAMING_URL = "https://start.qq.com/"
+CLOUD_GAMING_URL = "https://gamer.qq.com/?ADTAG=h5.home.redirect"
 
 # ---------------------------------------------------------------------------
 # 浏览器窗口 (CSS 像素)
@@ -22,7 +22,7 @@ GAME_LAUNCH_WAIT = 30       # 游戏启动后等待
 # ---------------------------------------------------------------------------
 # 模板匹配
 # ---------------------------------------------------------------------------
-MATCH_THRESHOLD = 0.8       # cv2 匹配置信度阈值
+MATCH_THRESHOLD = 0.53      # cv2 匹配置信度阈值（云游戏视频流有压缩）
 MAX_RETRIES = 3              # 每个按钮最大重试次数
 RETRY_INTERVAL = 2           # 重试间隔 (秒)
 
@@ -33,6 +33,18 @@ TEMPLATES_DIR = "templates"
 SCREENSHOTS_DIR = "screenshots"
 
 # ---------------------------------------------------------------------------
-# QQ 账号 (密码不存储，运行时通过 getpass 输入)
+# 资源路径工具
 # ---------------------------------------------------------------------------
-QQ_NUMBER = ""  # 在此填写 QQ 号，或运行时被询问
+import sys
+import os
+
+def resource_path(relative_path: str) -> str:
+    """获取资源文件绝对路径，兼容开发环境和 PyInstaller 打包。
+
+    PyInstaller 打包后，资源文件解压到 sys._MEIPASS 临时目录。
+    """
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path)
