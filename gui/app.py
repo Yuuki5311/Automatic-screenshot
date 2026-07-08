@@ -350,6 +350,14 @@ class App(tk.Tk):
 
                 self._send({"type": "log", "text": "✅ 已点击秒玩，等待游戏启动...", "level": "success"})
 
+                # ---- 清除游戏启动后的弹窗（仅首次） ----
+                self._send({"type": "log", "text": "等待 10 秒后清除初始弹窗..."})
+                time.sleep(10)
+                # 点击屏幕空白区域消除弹窗
+                sw, sh = pyautogui.size()
+                pyautogui.click(int(sw * 0.5), int(sh * 0.85))
+                self._send({"type": "log", "text": "已尝试清除弹窗"})
+
             # ====== 阶段 3: 游戏内登录 + 截图 ======
             if self._stop_event.is_set():
                 return
