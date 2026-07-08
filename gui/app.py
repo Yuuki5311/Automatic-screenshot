@@ -366,7 +366,17 @@ class App(tk.Tk):
 
             nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
 
-            # ---- 3a. 让用户选择登录平台 ----
+            # ---- 3a. 先退出当前登录（防止自动登录残留） ----
+            self._send({"type": "log", "text": "正在退出当前游戏登录..."})
+            time.sleep(3)
+            if nav.find_and_click("game_logout_btn.png", timeout=5):
+                self._send({"type": "log", "text": "已点击退出登录"})
+                time.sleep(2)
+                nav.find_and_click("popup_close.png", timeout=3)
+            else:
+                self._send({"type": "log", "text": "未检测到退出按钮，可能已是未登录状态"})
+
+            # ---- 3b. 让用户选择登录平台 ----
             self._platform_event.clear()
             self._platform_choice = None
             self._send({"type": "platform_select"})
