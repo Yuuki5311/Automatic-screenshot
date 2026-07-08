@@ -21,6 +21,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from selenium.common.exceptions import NoSuchElementException
+
 from config import CLOUD_GAMING_URL, PAGE_LOAD_WAIT
 from logger import get_logger
 
@@ -154,29 +156,76 @@ def web_login(
             # 切回顶层检测页面变化
             driver.switch_to.default_content()
 
-            # 检测是否已登录：查找用户头像或昵称元素
-            user_elements = driver.find_elements(By.CSS_SELECTOR, ".user-info, .user-name, .avatar, img[class*='avatar']")
-            for elem in user_elements:
-                if elem.is_displayed():
-                    on_status("✅ 腾讯先锋登录成功")
-                    time.sleep(PAGE_LOAD_WAIT)
-                    return True
-
-            # 检测登录弹窗是否已关闭
+            # ---- 5a. 检测登录弹窗状态 ----
             try:
                 login_popup = driver.find_element(By.ID, "user_login")
                 if not login_popup.is_displayed():
-                    on_status("✅ 腾讯先锋登录成功")
+                    on_status("✅ 腾讯先锋登录成功（弹窗已关闭）")
                     time.sleep(PAGE_LOAD_WAIT)
+                    driver.save_screenshot("debug_login_success.png")
+                    return True
+            except NoSuchElementException:
+                # 登录按钮从 DOM 彻底消失 = 页面已切换为登录后状态
+                on_status("✅ 腾讯先锋登录成功（已登录）")
+                time.sleep(PAGE_LOAD_WAIT)
+                driver.save_screenshot("debug_login_success.png")
+                return True
+            except Exception:
+                pass  # 真正的瞬态错误，继续轮询
+
+            # ---- 5b. Cookie 检测 ----
+            cookies = driver.get_cookies()
+            for cookie in cookies:
+                if cookie.get("name", "") in (
+                    "p_uin", "p_skey", "pt2gguin", "uin", "skey",
+                ):
+                    on_status("✅ 腾讯先锋登录成功（Cookie 检测）")
+                    time.sleep(PAGE_LOAD_WAIT)
+                    driver.save_screenshot("debug_login_success.png")
+                    return True
+
+            # ---- 5c. JS 检测页面用户元素或 auth cookie ----
+            try:
+                logged_in = driver.execute_script("""
+                    if (document.cookie.indexOf('p_uin=') > -1) return true;
+                    if (document.cookie.indexOf('uin=') > -1) return true;
+                    if (document.querySelector('[class*="user"]')) return true;
+                    if (document.querySelector('[class*="avatar"]')) return true;
+                    if (document.querySelector('[class*="nick"]')) return true;
+                    return false;
+                """)
+                if logged_in:
+                    on_status("✅ 腾讯先锋登录成功（JS 检测）")
+                    time.sleep(PAGE_LOAD_WAIT)
+                    driver.save_screenshot("debug_login_success.png")
                     return True
             except Exception:
-                pass  # transient error, keep polling
+                pass
+
+            # ---- 5d. CSS 检测用户元素 ----
+            user_selectors = [
+                ".user-info", ".user-name", ".user-avatar", ".avatar",
+                "img[class*='avatar']", "[class*='user']", "[class*='nickname']",
+                ".header-avatar", ".login-user", "#user-info",
+            ]
+            for sel in user_selectors:
+                try:
+                    elements = driver.find_elements(By.CSS_SELECTOR, sel)
+                    for elem in elements:
+                        if elem.is_displayed():
+                            on_status("✅ 腾讯先锋登录成功（用户元素检测）")
+                            time.sleep(PAGE_LOAD_WAIT)
+                            driver.save_screenshot("debug_login_success.png")
+                            return True
+                except Exception:
+                    continue
 
         except Exception:
             pass
 
         time.sleep(2)
 
+    driver.save_screenshot("debug_login_timeout.png")
     on_status("⚠️ 扫码超时")
     return False
 
