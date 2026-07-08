@@ -282,11 +282,24 @@ def game_login(
         on_status(f"未知的平台选择: {platform}")
         return False
 
+    # ---- 计算搜索区域 ----
+    screen_w, screen_h = pyautogui.size()
+    scale = nav._scale
+
+    # 退出按钮：左上角 30%×15% 区域
+    logout_bounds = (0, 0, int(screen_w * scale * 0.3), int(screen_h * scale * 0.15))
+
+    # 平台按钮：微信在左半边，QQ 在右半边
+    if platform.startswith("wx"):
+        platform_bounds = (0, 0, int(screen_w * scale * 0.5), int(screen_h * scale))
+    else:
+        platform_bounds = (int(screen_w * scale * 0.5), 0, int(screen_w * scale * 0.5), int(screen_h * scale))
+
     # ---- 1. 退出当前登录 ----
     on_status("正在退出当前游戏登录...")
     time.sleep(3)  # 等游戏画面稳定
 
-    if nav.find_and_click("game_logout_btn.png", timeout=5):
+    if nav.find_and_click("game_logout_btn.png", timeout=5, bounds=logout_bounds):
         on_status("已点击退出登录")
         time.sleep(3)
 
@@ -301,7 +314,7 @@ def game_login(
     on_status(f"选择登录平台: {platform_name}...")
     time.sleep(2)
 
-    if not nav.find_and_click(template_file, timeout=10):
+    if not nav.find_and_click(template_file, timeout=10, bounds=platform_bounds):
         on_status(f"找不到 {platform_name} 登录按钮 ({template_file})")
         return False
 
