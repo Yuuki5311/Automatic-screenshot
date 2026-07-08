@@ -287,7 +287,8 @@ def game_login(
     scale = nav._scale
 
     # 退出按钮：左上角 30%×15% 区域
-    logout_bounds = (0, 0, int(screen_w * scale * 0.3), int(screen_h * scale * 0.15))
+    # 退出按钮：右上角 30%×15% 区域
+    logout_bounds = (int(screen_w * scale * 0.7), 0, int(screen_w * scale * 0.3), int(screen_h * scale * 0.15))
 
     # 平台按钮：微信在左半边，QQ 在右半边
     if platform.startswith("wx"):
