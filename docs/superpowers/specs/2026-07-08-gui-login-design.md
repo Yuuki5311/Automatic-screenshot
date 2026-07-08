@@ -157,7 +157,90 @@ def game_login(nav: Navigator, on_qr, on_status) -> bool:
 
 ---
 
-## 8. 错误处理
+## 8. 打包为 exe 的适配约束
+
+最终使用 PyInstaller 打包成单文件 `.exe`（Windows）/ `.app`（macOS）。
+
+### 8.1 资源路径解析
+
+打包后资源文件不在文件系统中，需要用 `sys._MEIPASS` 解析：
+
+```python
+# 新增 util/paths.py 或直接在 config.py 中
+import sys
+import os
+
+def resource_path(relative_path: str) -> str:
+    """获取资源文件的绝对路径，兼容 PyInstaller 打包。"""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path)
+```
+
+所有读取 `templates/` 目录的地方（`Navigator`、截图流程）统一使用此函数。
+
+### 8.2 ChromeDriver 管理
+
+引入 `webdriver-manager` 库替代手动管理 ChromeDriver：
+
+```python
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
+
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=options)
+```
+
+打包后自动下载匹配的 ChromeDriver，无需用户单独配置。
+
+### 8.3 平台兼容
+
+`browser.py` 中的 macOS AppleScript 全屏操作在 Windows 上无效且报错。需要平台检测：
+
+```python
+import platform
+
+if platform.system() == "Darwin":
+    # macOS 全屏 AppleScript
+    ...
+elif platform.system() == "Windows":
+    # Windows 最大化（Selenium 已有 --window-size 配合 maximize_window）
+    driver.maximize_window()
+```
+
+### 8.4 新增依赖
+
+```
+# requirements.txt 新增
+webdriver-manager>=4.0
+Pillow>=10.0        # 已有（navigator.py 已使用）
+```
+
+Tkinter 为 Python 标准库，无需添加。
+
+---
+
+## 9. 文件变更概览（更新）
+
+| 文件 | 变更 |
+|------|------|
+| `gui/__init__.py` | 新增 |
+| `gui/app.py` | 新增 — Tkinter 主窗口，页面管理 |
+| `gui/widgets/__init__.py` | 新增 |
+| `gui/widgets/qr_display.py` | 新增 — 可复用二维码展示组件 |
+| `gui/widgets/log_view.py` | 新增 — 实时日志/进度组件 |
+| `main.py` | 修改 — 入口改为启动 GUI |
+| `login.py` | 修改 — 新增 `web_login()` 和 `game_login()`，回调模式 |
+| `browser.py` | 修改 — 新增 webdriver-manager + 平台兼容 |
+| `navigator.py` | 修改 — 模板路径使用 `resource_path()` |
+| `config.py` | 修改 — 移除 QQ_NUMBER，新增 `resource_path()` |
+| `requirements.txt` | 修改 — 新增 webdriver-manager |
+
+---
+
+## 10. 错误处理
 
 - 任何步骤失败 → 显示错误页，提供【重试】和【退出】按钮
 - 扫码超时（5分钟）→ 提示超时，提供【重新获取二维码】按钮
