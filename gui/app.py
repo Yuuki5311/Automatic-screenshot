@@ -35,6 +35,11 @@ class App(tk.Tk):
         # ---- 状态 ----
         self._platform_logged_in = False  # 腾讯先锋是否已登录
 
+        # ---- 平台选择（阶段 3） ----
+        self._platform_event = threading.Event()
+        self._platform_choice = None
+        self._platform_var = tk.StringVar(value="qq_ios")
+
         # ---- 构建 UI ----
         self._build_ui()
 
@@ -93,6 +98,38 @@ class App(tk.Tk):
         self._qr_display = QRDisplay(self._page_qr, qr_size=260)
         self._qr_display.pack(fill="both", expand=True, pady=20)
 
+        # ---- 页面 2.5: 游戏平台选择页 ----
+        self._page_platform = ttk.Frame(self._page_container)
+        ttk.Label(
+            self._page_platform, text="选择游戏登录平台",
+            font=("", 14, "bold")
+        ).pack(pady=(30, 5))
+        ttk.Label(
+            self._page_platform,
+            text="请选择要在游戏内登录的平台和区服：",
+            font=("", 11)
+        ).pack(pady=(0, 15))
+
+        platform_frame = ttk.LabelFrame(self._page_platform, text="登录平台", padding=10)
+        platform_frame.pack(pady=10)
+
+        platforms = [
+            ("🟢 微信 iOS 好友", "wx_ios"),
+            ("🟢 微信安卓好友", "wx_android"),
+            ("🔵 QQ iOS 好友", "qq_ios"),
+            ("🔵 QQ 安卓好友", "qq_android"),
+        ]
+        for text, value in platforms:
+            ttk.Radiobutton(
+                platform_frame, text=text,
+                variable=self._platform_var, value=value
+            ).pack(anchor="w", pady=4)
+
+        ttk.Button(
+            self._page_platform, text="确认选择",
+            command=self._on_platform_confirm, width=20
+        ).pack(pady=20)
+
         # ---- 页面 3: 进度页 ----
         self._page_progress = ttk.Frame(self._page_container)
         self._log_view = LogView(self._page_progress)
@@ -132,13 +169,14 @@ class App(tk.Tk):
 
     def _show_page(self, name: str):
         """显示指定页面，隐藏其余。"""
-        for page in [self._page_idle, self._page_qr,
+        for page in [self._page_idle, self._page_qr, self._page_platform,
                      self._page_progress, self._page_done]:
             page.pack_forget()
 
         mapping = {
             "idle": self._page_idle,
             "qr": self._page_qr,
+            "platform": self._page_platform,
             "progress": self._page_progress,
             "done": self._page_done,
         }
@@ -172,6 +210,15 @@ class App(tk.Tk):
     def _on_rerun(self):
         """完成页点击「再跑一轮」。"""
         self._on_start()
+
+    def _on_platform_confirm(self):
+        """平台选择页点击确认。"""
+        self._platform_choice = self._platform_var.get()
+        self._platform_event.set()
+        self._show_page("progress")
+        self._log_view.add_log(
+            f"已选择: {self._platform_choice}", "info"
+        )
 
     def _on_close(self):
         """关闭窗口。"""
@@ -215,6 +262,11 @@ class App(tk.Tk):
             self._qr_display.update_status(
                 msg["text"], msg.get("color", "black")
             )
+
+        elif msg_type == "platform_select":
+            self._platform_event.clear()
+            self._platform_choice = None
+            self._show_page("platform")
 
         elif msg_type == "page":
             self._show_page(msg["name"])
@@ -306,11 +358,34 @@ class App(tk.Tk):
 
             nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
 
+            # ---- 3a. 让用户选择登录平台 ----
+            self._platform_event.clear()
+            self._platform_choice = None
+            self._send({"type": "platform_select"})
+            self._send({"type": "log", "text": "请在 GUI 中选择游戏登录平台..."})
+
+            # 等待用户确认（最多等 2 分钟）
+            if not self._platform_event.wait(timeout=120):
+                self._send({"type": "log", "text": "❌ 平台选择超时", "level": "error"})
+                self._send({"type": "done", "text": "❌ 平台选择超时"})
+                return
+
+            if self._stop_event.is_set():
+                return
+
+            platform = self._platform_choice or "qq_ios"
+            platform_display = {
+                "wx_ios": "微信 iOS", "wx_android": "微信安卓",
+                "qq_ios": "QQ iOS", "qq_android": "QQ 安卓",
+            }.get(platform, platform)
+            self._send({"type": "log", "text": f"已选择游戏登录平台: {platform_display}"})
+
+            # ---- 3b. 执行游戏内登录 ----
             def on_game_qr(image):
                 self._send({
                     "type": "qr",
                     "image": image,
-                    "title": "第 2/2 步：请扫描游戏登录二维码",
+                    "title": f"第 2/2 步：请扫描游戏 {platform_display} 登录二维码",
                     "status": "⏳ 等待扫码中...",
                 })
 
@@ -322,7 +397,7 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": text,
                             "level": "success" if "成功" in text else "info"})
 
-            if not game_login(nav, on_game_qr, on_game_status):
+            if not game_login(nav, platform, on_game_qr, on_game_status):
                 self._send({"type": "log", "text": "❌ 游戏登录失败", "level": "error"})
                 self._send({"type": "done", "text": "❌ 游戏登录失败"})
                 return

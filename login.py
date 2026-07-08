@@ -235,19 +235,34 @@ def web_login(
 # ---------------------------------------------------------------------------
 
 
+# 平台 → 模板文件映射
+PLATFORM_TEMPLATES = {
+    "wx_ios": "game_wx_ios.png",
+    "wx_android": "game_wx_android.png",
+    "qq_ios": "game_qq_ios.png",
+    "qq_android": "game_qq_android.png",
+}
+
+
 def game_login(
     nav,  # Navigator 实例
+    platform: str,
     on_qr: Callable[[Image.Image], None],
     on_status: Callable[[str], None],
     timeout: int = 300,
 ) -> bool:
-    """在云游戏画面中检测登录二维码并等待用户扫码。
+    """在云游戏画面中完成游戏内账号登录。
 
-    游戏启动后，画面中会出现游戏内登录二维码。
-    此函数截屏 → 检测二维码 → 展示给用户 → 等待扫码完成。
+    流程：
+        1. 退出当前登录（点击左上角退出按钮）
+        2. 点击用户选择的平台登录按钮
+        3. 截取二维码 → on_qr(image)
+        4. 轮询检测登录成功
+        5. 点击「进入游戏」
 
     Args:
         nav: Navigator 实例。
+        platform: 'wx_ios' | 'wx_android' | 'qq_ios' | 'qq_android'
         on_qr: 截取到二维码时的回调。
         on_status: 状态更新回调。
         timeout: 扫码等待超时（秒）。
@@ -255,12 +270,48 @@ def game_login(
     Returns:
         bool: 登录成功返回 True。
     """
-    on_status("等待游戏加载并检测登录二维码...")
-    time.sleep(8)  # 等游戏画面加载
+    platform_name = {
+        "wx_ios": "微信 iOS",
+        "wx_android": "微信安卓",
+        "qq_ios": "QQ iOS",
+        "qq_android": "QQ 安卓",
+    }.get(platform, platform)
 
-    # ---- 使用 OpenCV QRCodeDetector 检测二维码 ----
+    template_file = PLATFORM_TEMPLATES.get(platform)
+    if template_file is None:
+        on_status(f"未知的平台选择: {platform}")
+        return False
+
+    # ---- 1. 退出当前登录 ----
+    on_status("正在退出当前游戏登录...")
+    time.sleep(3)  # 等游戏画面稳定
+
+    if nav.find_and_click("game_logout_btn.png", timeout=5):
+        on_status("已点击退出登录")
+        time.sleep(3)
+
+        # 处理确认退出的弹窗
+        nav.find_and_click("popup_close.png", timeout=3)
+        time.sleep(2)
+    else:
+        on_status("未检测到退出按钮，可能已是未登录状态")
+        time.sleep(1)
+
+    # ---- 2. 点击平台登录按钮 ----
+    on_status(f"选择登录平台: {platform_name}...")
+    time.sleep(2)
+
+    if not nav.find_and_click(template_file, timeout=10):
+        on_status(f"找不到 {platform_name} 登录按钮 ({template_file})")
+        return False
+
+    on_status(f"已选择 {platform_name} 登录")
+
+    # ---- 3. 等待并截取二维码 ----
+    on_status("等待登录二维码...")
+    time.sleep(3)
+
     qr_detector = cv2.QRCodeDetector()
-
     start = time.time()
     qr_sent = False
 
@@ -270,12 +321,32 @@ def game_login(
         frame = np.array(screenshot)
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
+        # ---- 检测登录成功 ----
+        if nav.wait_for_template("avatar.png", timeout=2):
+            on_status("✅ 游戏登录成功")
+            time.sleep(2)
+            # 步骤 4: 点击进入游戏
+            if nav.find_and_click("enter_game.png", timeout=10):
+                on_status("✅ 已点击进入游戏")
+                time.sleep(3)
+                return True
+            else:
+                # enter_game 可能已自动进入
+                on_status("✅ 游戏登录成功，已进入游戏")
+                time.sleep(3)
+                return True
+
+        if nav.wait_for_template("enter_game.png", timeout=2):
+            if nav.find_and_click("enter_game.png", timeout=3):
+                on_status("✅ 游戏登录成功，已进入游戏")
+                time.sleep(3)
+                return True
+
+        # ---- 截取二维码 ----
         if not qr_sent:
-            # 尝试检测二维码
             try:
                 data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
                 if bbox is not None and len(bbox) > 0:
-                    # 裁剪二维码区域
                     pts = bbox.astype(int).reshape(4, 2)
                     x_min = max(0, pts[:, 0].min() - 20)
                     y_min = max(0, pts[:, 1].min() - 20)
@@ -285,22 +356,9 @@ def game_login(
                     qr_crop = screenshot.crop((x_min, y_min, x_max, y_max))
                     on_qr(qr_crop)
                     qr_sent = True
-                    on_status("请使用手机扫描游戏登录二维码...")
+                    on_status(f"请使用手机扫描 {platform_name} 登录二维码...")
             except Exception:
                 pass
-
-        # 检测登录成功：avatar.png 出现在屏幕上
-        if nav.wait_for_template("avatar.png", timeout=2):
-            on_status("✅ 游戏登录成功")
-            time.sleep(3)
-            return True
-
-        # 检测 enter_game.png 可能出现在登录完成后
-        if nav.wait_for_template("enter_game.png", timeout=2):
-            if nav.find_and_click("enter_game.png", timeout=3):
-                on_status("✅ 游戏登录成功，已进入游戏")
-                time.sleep(3)
-                return True
 
         time.sleep(2)
 
