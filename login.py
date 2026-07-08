@@ -254,11 +254,10 @@ def game_login(
     """在云游戏画面中完成游戏内账号登录。
 
     流程：
-        1. 退出当前登录（点击左上角退出按钮）
-        2. 点击用户选择的平台登录按钮
-        3. 截取二维码 → on_qr(image)
-        4. 轮询检测登录成功
-        5. 点击「进入游戏」
+        1. 点击用户选择的平台登录按钮
+        2. 截取二维码 → on_qr(image)
+        3. 轮询检测登录成功
+        4. 点击「进入游戏」
 
     Args:
         nav: Navigator 实例。
@@ -286,32 +285,13 @@ def game_login(
     screen_w, screen_h = pyautogui.size()
     scale = nav._scale
 
-    # 退出按钮：左上角 30%×15% 区域
-    # 退出按钮：右上角 30%×15% 区域
-    logout_bounds = (int(screen_w * scale * 0.7), 0, int(screen_w * scale * 0.3), int(screen_h * scale * 0.15))
-
     # 平台按钮：微信在左半边，QQ 在右半边
     if platform.startswith("wx"):
         platform_bounds = (0, 0, int(screen_w * scale * 0.5), int(screen_h * scale))
     else:
         platform_bounds = (int(screen_w * scale * 0.5), 0, int(screen_w * scale * 0.5), int(screen_h * scale))
 
-    # ---- 1. 退出当前登录 ----
-    on_status("正在退出当前游戏登录...")
-    time.sleep(3)  # 等游戏画面稳定
-
-    if nav.find_and_click("game_logout_btn.png", timeout=5, bounds=logout_bounds):
-        on_status("已点击退出登录")
-        time.sleep(3)
-
-        # 处理确认退出的弹窗
-        nav.find_and_click("popup_close.png", timeout=3)
-        time.sleep(2)
-    else:
-        on_status("未检测到退出按钮，可能已是未登录状态")
-        time.sleep(1)
-
-    # ---- 2. 点击平台登录按钮 ----
+    # ---- 1. 点击平台登录按钮 ----
     on_status(f"选择登录平台: {platform_name}...")
     time.sleep(2)
 
