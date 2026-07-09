@@ -387,9 +387,9 @@ class App(tk.Tk):
                     time.sleep(2)
                     # 点击确认弹窗中的「确定」按钮
                     if not _nav.find_and_click("game_logout_confirm.png", timeout=3):
-                        # 模板未匹配则点击屏幕中央（确认按钮常见位置）
+                        # 模板未匹配则点击屏幕下方（确认按钮常见位置）
                         sw, sh = pyautogui.size()
-                        pyautogui.click(int(sw * 0.5), int(sh * 0.55))
+                        pyautogui.click(int(sw * 0.5), int(sh * 0.75))
                 else:
                     self._send({"type": "log", "text": "未检测到退出按钮，可能已是未登录状态"})
 
