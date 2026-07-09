@@ -54,10 +54,14 @@ TEMPLATES = [
     ("personal_customize.png",   "【个性定制】入口",              "定制页面"),
     ("poke.png",                 "【个性戳戳】入口",              "个性定制页面"),
 
-    # ======== 游戏登录界面 ========
-    ("game_logout_btn.png",      "退出登录按钮（右上角）",       "游戏画面右上角"),
+    # ======== 弹窗相关 ========
+    ("popup_close.png",          "弹窗 X 关闭按钮",             "弹窗右上角"),
+    ("popup_close_small.png",    "小弹窗 X 关闭按钮",           "小弹窗右上角"),
     ("game_logout_confirm.png",  "退出确认弹窗「确定」按钮（底部）", "弹窗下方"),
     ("game_popup_confirm.png",   "通用弹窗确认按钮（底部）",       "弹窗下方"),
+
+    # ======== 游戏登录界面 ========
+    ("game_logout_btn.png",      "退出登录按钮（右上角）",       "游戏画面右上角"),
     ("game_login_other.png",     "「登录其他账号」按钮（底部）",    "弹窗下方"),
     ("game_wx_ios.png",          "「与微信iOS好友玩」（绿色按钮）", "登录界面左半边"),
     ("game_wx_android.png",      "「与微信安卓好友玩」（绿色按钮）", "登录界面左半边"),

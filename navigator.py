@@ -9,7 +9,6 @@ import time
 import cv2
 import numpy as np
 import pyautogui
-from PIL import Image
 
 from config import MATCH_THRESHOLD, MAX_RETRIES, RETRY_INTERVAL, CLICK_INTERVAL, resource_path
 from logger import get_logger
@@ -35,6 +34,9 @@ class Navigator:
         self.templates_dir = resource_path(templates_dir)
         self.threshold = threshold
         self.max_retries = max_retries
+
+        # 模板缓存：避免每次匹配都从磁盘加载
+        self._template_cache: dict[str, np.ndarray] = {}
 
         # Retina 缩放因子
         # pyautogui.screenshot() 返回物理像素，pyautogui.click() 使用逻辑坐标
@@ -68,11 +70,29 @@ class Navigator:
         pil_image = pyautogui.screenshot()
         # PIL Image (RGB) → numpy array → BGR for OpenCV
         rgb = np.array(pil_image)
-        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        # 显式释放中间对象，降低内存峰值
+        del pil_image
+        del rgb
+        return bgr
 
     def _template_path(self, template_name: str) -> str:
         """构建模板文件的完整路径。"""
         return f"{self.templates_dir}/{template_name}"
+
+    def _load_template(self, template_name: str) -> np.ndarray | None:
+        """加载模板图片，优先从缓存获取。
+
+        模板是小文件（几十 KB），缓存后避免重复磁盘 I/O
+        和反复分配/释放 numpy 数组。
+        """
+        path = self._template_path(template_name)
+        if path not in self._template_cache:
+            template = cv2.imread(path)
+            if template is None:
+                return None
+            self._template_cache[path] = template
+        return self._template_cache[path]
 
     def _physical_to_logical(self, x: int, y: int) -> tuple:
         """将物理像素坐标转换为逻辑坐标（用于鼠标点击）。"""
@@ -93,33 +113,33 @@ class Navigator:
     def find_and_click(
         self, template_name: str, timeout: int = 10,
         bounds: tuple = None, max_retries: int = None,
+        threshold: float = None,
     ) -> bool:
         """在全屏幕画面中匹配模板图并点击其中心位置。
 
         Args:
             template_name: 模板文件名。
             timeout: 保留参数。
-            bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素），
-                    用于排除相似但位置不对的匹配。
+            bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素）。
             max_retries: 最大重试次数，默认使用 self.max_retries。
+            threshold: 匹配置信度阈值，默认使用 self.threshold。
 
         Returns:
             bool: 匹配成功并点击返回 True，否则 False。
         """
-        template_path = self._template_path(template_name)
-        template = cv2.imread(template_path)
+        template = self._load_template(template_name)
 
         if template is None:
-            log.error(f"模板文件不存在: {template_path}")
+            log.error(f"模板文件不存在: {self._template_path(template_name)}")
             return False
 
         t_h, t_w = template.shape[:2]
         retries = max_retries if max_retries is not None else self.max_retries
+        _threshold = threshold if threshold is not None else self.threshold
 
         for attempt in range(1, retries + 1):
             screen = self._get_screenshot()
 
-            # 如果指定了搜索区域，裁剪屏幕
             if bounds is not None:
                 x, y, w, h = bounds
                 search_area = screen[y:y+h, x:x+w]
@@ -132,9 +152,9 @@ class Navigator:
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
             log.debug(f"匹配 {template_name} 尝试 {attempt}/{retries}: "
-                      f"置信度 {max_val:.3f} (阈值 {self.threshold})")
+                      f"置信度 {max_val:.3f} (阈值 {_threshold})")
 
-            if max_val >= self.threshold:
+            if max_val >= _threshold:
                 center_x = offset_x + max_loc[0] + t_w // 2
                 center_y = offset_y + max_loc[1] + t_h // 2
                 logical_x, logical_y = self._physical_to_logical(center_x, center_y)
@@ -148,32 +168,40 @@ class Navigator:
         log.warning(f"未能找到: {template_name}")
         return False
 
-    def wait_for_template(self, template_name: str, timeout: int = 15) -> bool:
+    def wait_for_template(self, template_name: str, timeout: int = 15,
+                          threshold: float = None) -> bool:
         """轮询等待模板出现（不点击）。
 
         Args:
             template_name: 模板文件名。
             timeout: 最大等待时间（秒）。
+            threshold: 匹配置信度阈值，默认使用 self.threshold。
 
         Returns:
             bool: 在超时前检测到模板返回 True，否则 False。
         """
-        template_path = self._template_path(template_name)
-        template = cv2.imread(template_path)
+        template = self._load_template(template_name)
 
         if template is None:
-            log.error(f"模板文件不存在: {template_path}")
+            log.error(f"模板文件不存在: {self._template_path(template_name)}")
             return False
+
+        _threshold = threshold if threshold is not None else self.threshold
 
         start = time.time()
         while time.time() - start < timeout:
             screen = self._get_screenshot()
             result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
-            if max_val >= self.threshold:
+            if max_val >= _threshold:
                 log.info(f"检测到 {template_name} (置信度 {max_val:.2f})")
                 return True
             time.sleep(1)
 
         log.warning(f"超时未检测到: {template_name}")
         return False
+
+    def cleanup(self) -> None:
+        """释放模板缓存，回收内存。"""
+        self._template_cache.clear()
+        log.debug("模板缓存已释放")

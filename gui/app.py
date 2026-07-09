@@ -8,6 +8,7 @@ from tkinter import ttk
 import threading
 import queue
 import time
+import random
 
 from gui.widgets.qr_display import QRDisplay
 from gui.widgets.log_view import LogView
@@ -35,8 +36,7 @@ class App(tk.Tk):
         # ---- 状态 ----
         self._platform_logged_in = False  # 腾讯先锋是否已登录
 
-        # ---- 平台选择（阶段 3） ----
-        self._platform_event = threading.Event()
+        # ---- 平台选择（首页直接选定） ----
         self._platform_choice = None
         self._platform_var = tk.StringVar(value="qq_ios")
 
@@ -70,48 +70,27 @@ class App(tk.Tk):
         ttk.Label(
             self._page_idle, text="就绪",
             font=("", 14, "bold")
-        ).pack(pady=(40, 5))
+        ).pack(pady=(20, 5))
         ttk.Label(
             self._page_idle,
             text="选择登录方式并启动",
             font=("", 11)
-        ).pack(pady=(0, 15))
+        ).pack(pady=(0, 10))
 
-        # 登录方式选择
-        login_frame = ttk.LabelFrame(self._page_idle, text="登录方式", padding=10)
-        login_frame.pack(pady=10)
+        # 腾讯先锋登录方式
+        login_frame = ttk.LabelFrame(self._page_idle, text="腾讯先锋登录", padding=10)
+        login_frame.pack(pady=5, fill="x", padx=10)
         self._login_type = tk.StringVar(value="qq")
         ttk.Radiobutton(
             login_frame, text="QQ 扫码登录", variable=self._login_type, value="qq"
-        ).pack(anchor="w", pady=3)
+        ).pack(anchor="w", pady=2)
         ttk.Radiobutton(
             login_frame, text="微信扫码登录", variable=self._login_type, value="wechat"
-        ).pack(anchor="w", pady=3)
+        ).pack(anchor="w", pady=2)
 
-        ttk.Button(
-            self._page_idle, text="启 动",
-            command=self._on_start, width=20
-        ).pack(pady=15)
-
-        # ---- 页面 2: 扫码页 ----
-        self._page_qr = ttk.Frame(self._page_container)
-        self._qr_display = QRDisplay(self._page_qr, qr_size=260)
-        self._qr_display.pack(fill="both", expand=True, pady=20)
-
-        # ---- 页面 2.5: 游戏平台选择页 ----
-        self._page_platform = ttk.Frame(self._page_container)
-        ttk.Label(
-            self._page_platform, text="选择游戏登录平台",
-            font=("", 14, "bold")
-        ).pack(pady=(30, 5))
-        ttk.Label(
-            self._page_platform,
-            text="请选择要在游戏内登录的平台和区服：",
-            font=("", 11)
-        ).pack(pady=(0, 15))
-
-        platform_frame = ttk.LabelFrame(self._page_platform, text="登录平台", padding=10)
-        platform_frame.pack(pady=10)
+        # 游戏内登录平台
+        platform_frame = ttk.LabelFrame(self._page_idle, text="游戏登录平台", padding=10)
+        platform_frame.pack(pady=5, fill="x", padx=10)
 
         platforms = [
             ("🟢 微信 iOS 好友", "wx_ios"),
@@ -123,12 +102,17 @@ class App(tk.Tk):
             ttk.Radiobutton(
                 platform_frame, text=text,
                 variable=self._platform_var, value=value
-            ).pack(anchor="w", pady=4)
+            ).pack(anchor="w", pady=2)
 
         ttk.Button(
-            self._page_platform, text="确认选择",
-            command=self._on_platform_confirm, width=20
-        ).pack(pady=20)
+            self._page_idle, text="启 动",
+            command=self._on_start, width=20
+        ).pack(pady=10)
+
+        # ---- 页面 2: 扫码页 ----
+        self._page_qr = ttk.Frame(self._page_container)
+        self._qr_display = QRDisplay(self._page_qr, qr_size=260)
+        self._qr_display.pack(fill="both", expand=True, pady=20)
 
         # ---- 页面 3: 进度页 ----
         self._page_progress = ttk.Frame(self._page_container)
@@ -169,14 +153,13 @@ class App(tk.Tk):
 
     def _show_page(self, name: str):
         """显示指定页面，隐藏其余。"""
-        for page in [self._page_idle, self._page_qr, self._page_platform,
+        for page in [self._page_idle, self._page_qr,
                      self._page_progress, self._page_done]:
             page.pack_forget()
 
         mapping = {
             "idle": self._page_idle,
             "qr": self._page_qr,
-            "platform": self._page_platform,
             "progress": self._page_progress,
             "done": self._page_done,
         }
@@ -202,6 +185,10 @@ class App(tk.Tk):
         self._log_view.add_log("启动任务...", "info")
         self._exit_btn.config(state="normal")
 
+        # 启动前锁定平台选择
+        self._platform_choice = self._platform_var.get()
+        self._log_view.add_log(f"游戏平台: {self._platform_choice}", "info")
+
         self._worker_thread = threading.Thread(
             target=self._run_workflow, daemon=True
         )
@@ -210,15 +197,6 @@ class App(tk.Tk):
     def _on_rerun(self):
         """完成页点击「再跑一轮」。"""
         self._on_start()
-
-    def _on_platform_confirm(self):
-        """平台选择页点击确认。"""
-        self._platform_choice = self._platform_var.get()
-        self._platform_event.set()
-        self._show_page("progress")
-        self._log_view.add_log(
-            f"已选择: {self._platform_choice}", "info"
-        )
 
     def _on_close(self):
         """关闭窗口。"""
@@ -272,11 +250,6 @@ class App(tk.Tk):
                 msg["text"], msg.get("color", "black")
             )
 
-        elif msg_type == "platform_select":
-            self._platform_event.clear()
-            self._platform_choice = None
-            self._show_page("platform")
-
         elif msg_type == "page":
             self._show_page(msg["name"])
 
@@ -295,7 +268,7 @@ class App(tk.Tk):
     def _run_workflow(self):
         """后台线程：执行完整的登录 → 截图工作流。"""
         from browser import create_browser
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, TEMPLATES_DIR, SCREENSHOTS_DIR, SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX, resource_path
         from login import web_login, game_login
         from game_launcher import launch_game
         from navigator import Navigator
@@ -307,6 +280,7 @@ class App(tk.Tk):
 
         _log = get_logger()
         driver = None
+        _nav = None
         nav = None
         monitor = None
 
@@ -402,9 +376,18 @@ class App(tk.Tk):
                 else:
                     self._send({"type": "log", "text": "未检测到退出按钮，可能已是未登录状态"})
 
+                # 退出登录完成，停止弹窗监控
+                if monitor is not None:
+                    monitor.stop()
+                    monitor = None
+
             # ====== 阶段 3: 游戏内登录 + 截图 ======
             if self._stop_event.is_set():
                 return
+
+            # 释放上一个 Navigator 的模板缓存
+            if _nav is not None:
+                _nav.cleanup()
 
             self._send({"type": "log", "text": "等待游戏窗口..."})
             nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
@@ -412,20 +395,6 @@ class App(tk.Tk):
             # ====== 阶段 3: 游戏登录（最多重试 3 次） ======
             GAME_LOGIN_MAX_RETRIES = 3
             game_login_ok = False
-
-            # 首次选择平台（仅一次）
-            self._platform_event.clear()
-            self._platform_choice = None
-            self._send({"type": "platform_select"})
-            self._send({"type": "log", "text": "请在 GUI 中选择游戏登录平台..."})
-
-            if not self._platform_event.wait(timeout=120):
-                self._send({"type": "log", "text": "❌ 平台选择超时", "level": "error"})
-                self._send({"type": "done", "text": "❌ 平台选择超时"})
-                return
-
-            if self._stop_event.is_set():
-                return
 
             platform = self._platform_choice or "qq_ios"
 
@@ -454,14 +423,12 @@ class App(tk.Tk):
                 if attempt > 1:
                     self._send({"type": "log", "text": f"游戏登录重试 ({attempt}/{GAME_LOGIN_MAX_RETRIES})...", "level": "warn"})
 
-                # 启动弹窗监控（如有旧的先停）
+                # 停止旧的弹窗监控（如有），阶段3不启动后台监控
                 if monitor is not None:
                     monitor.stop()
-                monitor = PopupMonitor(navigator=nav)
-                monitor.start()
+                    monitor = None
 
                 _log.info(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES}, platform={platform}")
-                monitor.stop()
                 if game_login(nav, platform, on_game_qr, on_game_status):
                     game_login_ok = True
                     break
@@ -478,14 +445,29 @@ class App(tk.Tk):
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
-            # ====== 阶段 4: 截图（带弹窗监控） ======
-            self._send({"type": "log", "text": "等待 5 秒后开始截图..."})
-            time.sleep(5)
+            # ---- 验证：确认已进入游戏主界面 ----
+            self._send({"type": "log", "text": "验证游戏主界面..."})
+            time.sleep(3)
+            if not nav.wait_for_template("avatar.png", timeout=10):
+                _log.error("[阶段3] 游戏登录验证失败：未检测到主界面头像")
+                self._send({"type": "log", "text": "❌ 未进入游戏主界面，登录可能失败", "level": "error"})
+                self._send({"type": "done", "text": "❌ 未进入游戏主界面"})
+                return
 
-            # 启动阶段 4 专属弹窗监控
+            # ====== 阶段 4: 截图 ======
+            self._send({"type": "log", "text": "等待 10 秒后处理弹窗..."})
+            time.sleep(10)
+
+            # ---- 弹窗监控配置（阶段 4 全程异步） ----
+            # 修改弹窗检测逻辑：编辑 popup_monitor.py 的 _do_scan() 中 buttons 列表
             monitor = PopupMonitor(navigator=nav)
+            self._send({"type": "log", "text": "正在清理弹窗..."})
+            monitor.close_all_popups()
+            self._send({"type": "log", "text": "弹窗清理完毕，等待 3 秒..."})
+            time.sleep(3)
+            # 启动异步弹窗监控，截图全程后台扫描
             monitor.start()
-            _log.info("阶段 4 弹窗监控已启动")
+            _log.info("阶段 4 异步弹窗监控已启动")
 
             avatar_bounds = None
             nobility_bounds = None
@@ -514,19 +496,13 @@ class App(tk.Tk):
                     ("lingbao.png", "点击灵宝"),
                 ], 1),
                 ("皮肤图鉴", [
-                    ("skin_illustrated.png", ""),
+                    ("skin_illustrated.png", "点击皮肤图鉴"),
                 ], 1),
                 ("积分夺宝", [
                     ("shop_icon.png", "点击商城"),
                     ("lottery_tab.png", "点击夺宝"),
                     ("points_lottery.png", "点击积分夺宝"),
                 ], 2),
-                ("天幕", [
-                    ("customize_icon.png", "点击定制"),
-                    ("skin_customize.png", "点击皮肤定制"),
-                    ("my_tab.png", "点击我的"),
-                    ("sky_curtain.png", "点击天幕"),
-                ], 1),
                 ("小兵", [
                     ("minion.png", "点击小兵"),
                 ], 1),
@@ -542,6 +518,9 @@ class App(tk.Tk):
 
             total = len(screenshot_tasks)
             success = 0
+
+            # 需要在特定节点触发弹窗清理的任务 index
+            POPUP_CHECK_POINTS = {5, 6, 8, 9}
 
             for idx, (name, clicks, back_count) in enumerate(screenshot_tasks, 1):
                 if self._stop_event.is_set():
@@ -563,6 +542,13 @@ class App(tk.Tk):
                         all_ok = False
                         break
 
+                    # 贵族：点击图标后清理弹窗
+                    if idx == 9 and template == "nobility_icon.png":
+                        self._send({"type": "log", "text": "  清理弹窗（贵族图标后）...", "level": "info"})
+                        monitor.pause()
+                        monitor.close_all_popups()
+                        monitor.resume()
+
                 if all_ok:
                     time.sleep(PAGE_LOAD_WAIT)
                     shot.take(name)
@@ -572,6 +558,18 @@ class App(tk.Tk):
                     for _ in range(back_count):
                         nav.find_and_click("back_arrow.png", timeout=3)
                         time.sleep(3)
+
+                    # 指定节点返回后清理弹窗（暂停异步监控避免冲突）
+                    if idx in POPUP_CHECK_POINTS:
+                        self._send({"type": "log", "text": f"  清理弹窗（{name}返回后）...", "level": "info"})
+                        monitor.pause()
+                        monitor.close_all_popups()
+                        monitor.resume()
+
+                    # 截图间隔随机延迟，模拟人类操作节奏
+                    delay = random.uniform(SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX)
+                    self._send({"type": "log", "text": f"  等待 {delay:.1f}s...", "level": "info"})
+                    time.sleep(delay)
                 else:
                     self._send({"type": "log", "text": f"  ❌ 截图失败: {name}", "level": "error"})
 
@@ -600,6 +598,10 @@ class App(tk.Tk):
         finally:
             if monitor is not None:
                 monitor.stop()
+            if _nav is not None:
+                _nav.cleanup()
+            if nav is not None:
+                nav.cleanup()
             if driver is not None:
                 driver.quit()
 

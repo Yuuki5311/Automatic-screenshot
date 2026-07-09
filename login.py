@@ -293,6 +293,8 @@ def game_login(
     qr_appeared = False
     QR_CODE_TIMEOUT = 15  # 15 秒内必须出现二维码
 
+    avatar_detected_at = None  # 头像出现时间（用于快速重试）
+
     # 重新启用 QRCodeDetector 用于检测二维码是否出现
     qr_detector = cv2.QRCodeDetector()
 
@@ -305,10 +307,9 @@ def game_login(
                 on_status("✅ 已点击进入游戏")
                 time.sleep(3)
                 return True
-            else:
-                on_status("✅ 游戏登录成功，已进入游戏")
-                time.sleep(3)
-                return True
+            # avatar 出现但 enter_game 没出现 → 记录时间，限期等待
+            if avatar_detected_at is None:
+                avatar_detected_at = time.time()
 
         if nav.wait_for_template("enter_game.png", timeout=2):
             if nav.find_and_click("enter_game.png", timeout=3):
@@ -316,16 +317,24 @@ def game_login(
                 time.sleep(3)
                 return True
 
+        # avatar 已出现超过 30 秒仍未找到 enter_game → 返回重试平台选择
+        if avatar_detected_at and time.time() - avatar_detected_at > 30:
+            on_status("⚠️ 登录成功但未找到进入游戏按钮，将重试平台选择")
+            return False
+
         # ---- 检测二维码是否出现 ----
         if not qr_appeared:
             try:
                 screenshot = pyautogui.screenshot()
                 frame = np.array(screenshot)
                 frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                del screenshot
+                del frame
                 data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
                 if bbox is not None and len(bbox) > 0:
                     qr_appeared = True
                     on_status("✅ 检测到登录二维码")
+                del frame_bgr
             except Exception:
                 pass
 
