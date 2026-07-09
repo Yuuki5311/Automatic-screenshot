@@ -6,6 +6,8 @@
 import time
 import threading
 
+import pyautogui
+
 from logger import get_logger
 
 log = get_logger()
@@ -42,7 +44,12 @@ class PopupMonitor:
         if self._paused or self.navigator is None:
             return False
         try:
-            # 方式 1: 右上角 X 关闭按钮
+            # 计算底部 50% 搜索区域
+            sw, sh = pyautogui.size()
+            scale = self.navigator._scale
+            bottom_bounds = (0, int(sh * scale * 0.5), int(sw * scale), int(sh * scale * 0.5))
+
+            # 方式 1: 右上角 X 关闭按钮（全图搜索）
             if self.navigator.wait_for_template("popup_close.png", timeout=1):
                 time.sleep(2)
                 if self.navigator.find_and_click("popup_close.png", timeout=2):
@@ -50,18 +57,18 @@ class PopupMonitor:
                     log.info(f"异步关闭弹窗 #{self._closed_count} (X按钮)")
                     return True
 
-            # 方式 2: 弹窗下方确认按钮
+            # 方式 2: 弹窗下方确认按钮（底部 50% 搜索）
             if self.navigator.wait_for_template("game_logout_confirm.png", timeout=1):
                 time.sleep(2)
-                if self.navigator.find_and_click("game_logout_confirm.png", timeout=2):
+                if self.navigator.find_and_click("game_logout_confirm.png", timeout=2, bounds=bottom_bounds):
                     self._closed_count += 1
                     log.info(f"异步关闭弹窗 #{self._closed_count} (确认按钮)")
                     return True
 
-            # 方式 3: 通用弹窗确认按钮
+            # 方式 3: 通用弹窗确认按钮（底部 50% 搜索）
             if self.navigator.wait_for_template("game_popup_confirm.png", timeout=1):
                 time.sleep(2)
-                if self.navigator.find_and_click("game_popup_confirm.png", timeout=2):
+                if self.navigator.find_and_click("game_popup_confirm.png", timeout=2, bounds=bottom_bounds):
                     self._closed_count += 1
                     log.info(f"异步关闭弹窗 #{self._closed_count} (通用确认)")
                     return True
