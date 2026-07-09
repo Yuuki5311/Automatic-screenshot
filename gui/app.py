@@ -479,6 +479,9 @@ class App(tk.Tk):
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
             # ====== 阶段 4: 截图（带弹窗监控） ======
+            self._send({"type": "log", "text": "等待 5 秒后开始截图..."})
+            time.sleep(5)
+
             # 启动阶段 4 专属弹窗监控
             monitor = PopupMonitor(navigator=nav)
             monitor.start()
