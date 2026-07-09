@@ -385,10 +385,11 @@ class App(tk.Tk):
                 if _nav.find_and_click("game_logout_btn.png", timeout=5):
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    # 点击确认弹窗中的「确定」按钮
-                    if not _nav.find_and_click("game_logout_confirm.png", timeout=3):
-                        # 模板未匹配则点击屏幕下方（确认按钮常见位置）
-                        sw, sh = pyautogui.size()
+                    # 点击确认弹窗中的「确定」按钮（屏幕下方 30% 区域搜索）
+                    sw, sh = pyautogui.size()
+                    confirm_bounds = (0, int(sh * _nav._scale * 0.7), int(sw * _nav._scale), int(sh * _nav._scale * 0.3))
+                    if not _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds):
+                        # 模板未匹配则点击屏幕下方
                         pyautogui.click(int(sw * 0.5), int(sh * 0.75))
                 else:
                     self._send({"type": "log", "text": "未检测到退出按钮，可能已是未登录状态"})
