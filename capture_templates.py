@@ -57,6 +57,7 @@ TEMPLATES = [
     # ======== 游戏登录界面 ========
     ("game_logout_btn.png",      "退出登录按钮（右上角）",       "游戏画面右上角"),
     ("game_logout_confirm.png",  "退出确认弹窗「确定」按钮（底部）", "弹窗下方"),
+    ("game_popup_confirm.png",   "通用弹窗确认按钮（底部）",       "弹窗下方"),
     ("game_wx_ios.png",          "「与微信iOS好友玩」（绿色按钮）", "登录界面左半边"),
     ("game_wx_android.png",      "「与微信安卓好友玩」（绿色按钮）", "登录界面左半边"),
     ("game_qq_ios.png",          "「与QQ iOS好友玩」（蓝色按钮）", "登录界面右半边"),

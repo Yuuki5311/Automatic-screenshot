@@ -58,6 +58,14 @@ class PopupMonitor:
                     log.info(f"异步关闭弹窗 #{self._closed_count} (确认按钮)")
                     return True
 
+            # 方式 3: 通用弹窗确认按钮
+            if self.navigator.wait_for_template("game_popup_confirm.png", timeout=1):
+                time.sleep(2)
+                if self.navigator.find_and_click("game_popup_confirm.png", timeout=2):
+                    self._closed_count += 1
+                    log.info(f"异步关闭弹窗 #{self._closed_count} (通用确认)")
+                    return True
+
         except Exception as e:
             log.debug(f"弹窗扫描异常: {e}")
         return False
