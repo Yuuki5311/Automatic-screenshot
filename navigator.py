@@ -92,7 +92,7 @@ class Navigator:
 
     def find_and_click(
         self, template_name: str, timeout: int = 10,
-        bounds: tuple = None,
+        bounds: tuple = None, max_retries: int = None,
     ) -> bool:
         """在全屏幕画面中匹配模板图并点击其中心位置。
 
@@ -101,6 +101,7 @@ class Navigator:
             timeout: 保留参数。
             bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素），
                     用于排除相似但位置不对的匹配。
+            max_retries: 最大重试次数，默认使用 self.max_retries。
 
         Returns:
             bool: 匹配成功并点击返回 True，否则 False。
@@ -113,8 +114,9 @@ class Navigator:
             return False
 
         t_h, t_w = template.shape[:2]
+        retries = max_retries if max_retries is not None else self.max_retries
 
-        for attempt in range(1, self.max_retries + 1):
+        for attempt in range(1, retries + 1):
             screen = self._get_screenshot()
 
             # 如果指定了搜索区域，裁剪屏幕
@@ -129,7 +131,7 @@ class Navigator:
             result = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
-            log.debug(f"匹配 {template_name} 尝试 {attempt}/{self.max_retries}: "
+            log.debug(f"匹配 {template_name} 尝试 {attempt}/{retries}: "
                       f"置信度 {max_val:.3f} (阈值 {self.threshold})")
 
             if max_val >= self.threshold:

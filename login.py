@@ -268,7 +268,7 @@ def game_login(
     on_status(f"选择登录平台: {platform_name}...")
     time.sleep(2)
 
-    if not nav.find_and_click(template_file, timeout=10, bounds=platform_bounds):
+    if not nav.find_and_click(template_file, timeout=10, bounds=platform_bounds, max_retries=5):
         on_status(f"找不到 {platform_name} 登录按钮 ({template_file})")
         return False
 
