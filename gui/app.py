@@ -376,23 +376,25 @@ class App(tk.Tk):
                 pyautogui.click(int(sw * 0.5), int(sh * 0.85))
                 self._send({"type": "log", "text": "已尝试清除弹窗"})
 
+                # ---- 3a. 退出当前登录（仅首次，防止自动登录残留） ----
+                self._send({"type": "log", "text": "等待游戏窗口..."})
+                time.sleep(2)
+                _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+                self._send({"type": "log", "text": "正在退出当前游戏登录..."})
+                time.sleep(3)
+                if _nav.find_and_click("game_logout_btn.png", timeout=5):
+                    self._send({"type": "log", "text": "已点击退出登录"})
+                    time.sleep(2)
+                    _nav.find_and_click("popup_close.png", timeout=3)
+                else:
+                    self._send({"type": "log", "text": "未检测到退出按钮，可能已是未登录状态"})
+
             # ====== 阶段 3: 游戏内登录 + 截图 ======
             if self._stop_event.is_set():
                 return
 
             self._send({"type": "log", "text": "等待游戏窗口..."})
-
             nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
-
-            # ---- 3a. 先退出当前登录（防止自动登录残留） ----
-            self._send({"type": "log", "text": "正在退出当前游戏登录..."})
-            time.sleep(3)
-            if nav.find_and_click("game_logout_btn.png", timeout=5):
-                self._send({"type": "log", "text": "已点击退出登录"})
-                time.sleep(2)
-                nav.find_and_click("popup_close.png", timeout=3)
-            else:
-                self._send({"type": "log", "text": "未检测到退出按钮，可能已是未登录状态"})
 
             # ---- 3b. 让用户选择登录平台 ----
             self._platform_event.clear()
