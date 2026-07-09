@@ -311,6 +311,11 @@ class App(tk.Tk):
         monitor = None
 
         try:
+            # ---- 启动弹窗监控 ----
+            monitor = PopupMonitor(navigator=None)
+            monitor.start()
+            _log.info("弹窗监控已启动")
+
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
             if not self._platform_logged_in:
                 if self._stop_event.is_set():
@@ -452,11 +457,11 @@ class App(tk.Tk):
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
-            # ====== 阶段 4: 截图（复用 main.py 逻辑） ======
-            self._send({"type": "log", "text": "启动弹窗监控..."})
-            monitor = PopupMonitor(navigator=nav)
-            monitor.start()
+            # ---- 停止弹窗监控（阶段 4 自行管理） ----
+            monitor.stop()
+            _log.info("弹窗监控已停止，阶段 4 接管")
 
+            # ====== 阶段 4: 截图 ======
             avatar_bounds = None
             nobility_bounds = None
 
@@ -547,9 +552,6 @@ class App(tk.Tk):
 
             self._send({"type": "progress", "current": total, "total": total})
             self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})
-
-            # ---- 停止弹窗监控 ----
-            monitor.stop()
 
             # ====== 退出游戏登录 ======
             self._send({"type": "log", "text": "正在退出游戏登录...", "level": "info"})
