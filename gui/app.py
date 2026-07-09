@@ -390,7 +390,7 @@ class App(tk.Tk):
 
                 self._send({"type": "log", "text": "正在退出当前游戏登录..."})
                 time.sleep(3)
-                if _nav.find_and_click("game_logout_btn.png", timeout=5, max_retries=5):
+                if _nav.find_and_click("game_logout_btn.png", timeout=5, max_retries=7):
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
                     # 点击确认弹窗中的「确定」按钮（屏幕下方 30% 区域搜索）
