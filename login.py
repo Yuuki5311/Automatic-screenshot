@@ -11,6 +11,8 @@
 import time
 from typing import Callable
 
+import cv2
+import numpy as np
 import pyautogui
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -288,6 +290,11 @@ def game_login(
     time.sleep(3)
 
     start = time.time()
+    qr_appeared = False
+    QR_CODE_TIMEOUT = 15  # 15 秒内必须出现二维码
+
+    # 重新启用 QRCodeDetector 用于检测二维码是否出现
+    qr_detector = cv2.QRCodeDetector()
 
     while time.time() - start < timeout:
         # ---- 检测登录成功 ----
@@ -308,6 +315,24 @@ def game_login(
                 on_status("✅ 游戏登录成功，已进入游戏")
                 time.sleep(3)
                 return True
+
+        # ---- 检测二维码是否出现 ----
+        if not qr_appeared:
+            try:
+                screenshot = pyautogui.screenshot()
+                frame = np.array(screenshot)
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
+                if bbox is not None and len(bbox) > 0:
+                    qr_appeared = True
+                    on_status("✅ 检测到登录二维码")
+            except Exception:
+                pass
+
+            # 15 秒内未出现二维码 → 返回失败，触发重试
+            if time.time() - start > QR_CODE_TIMEOUT:
+                on_status("⚠️ 未检测到登录二维码，将重试")
+                return False
 
         time.sleep(2)
 
