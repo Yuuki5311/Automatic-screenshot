@@ -311,11 +311,6 @@ class App(tk.Tk):
         monitor = None
 
         try:
-            # ---- 启动弹窗监控 ----
-            monitor = PopupMonitor(navigator=None)
-            monitor.start()
-            _log.info("弹窗监控已启动")
-
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
             if not self._platform_logged_in:
                 if self._stop_event.is_set():
@@ -387,6 +382,12 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": "等待游戏窗口..."})
                 time.sleep(2)
                 _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+
+                # 启动弹窗监控（有真实 Navigator）
+                monitor = PopupMonitor(navigator=_nav)
+                monitor.start()
+                _log.info("弹窗监控已启动")
+
                 self._send({"type": "log", "text": "正在退出当前游戏登录..."})
                 time.sleep(3)
                 if _nav.find_and_click("game_logout_btn.png", timeout=5):
@@ -407,6 +408,13 @@ class App(tk.Tk):
 
             self._send({"type": "log", "text": "等待游戏窗口..."})
             nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+
+            # 启动弹窗监控（如有旧的先停）
+            if monitor is not None:
+                monitor.stop()
+            monitor = PopupMonitor(navigator=nav)
+            monitor.start()
+            _log.info("阶段 3 弹窗监控已启动")
 
             # ---- 3b. 让用户选择登录平台 ----
             self._platform_event.clear()
