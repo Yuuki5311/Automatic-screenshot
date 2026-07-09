@@ -413,6 +413,43 @@ class App(tk.Tk):
             GAME_LOGIN_MAX_RETRIES = 3
             game_login_ok = False
 
+            # 首次选择平台（仅一次）
+            self._platform_event.clear()
+            self._platform_choice = None
+            self._send({"type": "platform_select"})
+            self._send({"type": "log", "text": "请在 GUI 中选择游戏登录平台..."})
+
+            if not self._platform_event.wait(timeout=120):
+                self._send({"type": "log", "text": "❌ 平台选择超时", "level": "error"})
+                self._send({"type": "done", "text": "❌ 平台选择超时"})
+                return
+
+            if self._stop_event.is_set():
+                return
+
+            platform = self._platform_choice or "qq_ios"
+
+            platform_display = {
+                "wx_ios": "微信 iOS", "wx_android": "微信安卓",
+                "qq_ios": "QQ iOS", "qq_android": "QQ 安卓",
+            }.get(platform, platform)
+            self._send({"type": "log", "text": f"已选择游戏登录平台: {platform_display}"})
+
+            def on_game_qr(image=None):
+                self._send({
+                    "type": "scan_wait",
+                    "title": f"游戏 {platform_display} 登录",
+                    "text": "⏳ 请在游戏窗口中扫码...",
+                })
+
+            def on_game_status(text):
+                if "成功" in text:
+                    self._send({"type": "qr_status", "text": text, "color": "green"})
+                else:
+                    self._send({"type": "qr_status", "text": text})
+                self._send({"type": "log", "text": text,
+                            "level": "success" if "成功" in text else "info"})
+
             for attempt in range(1, GAME_LOGIN_MAX_RETRIES + 1):
                 if attempt > 1:
                     self._send({"type": "log", "text": f"游戏登录重试 ({attempt}/{GAME_LOGIN_MAX_RETRIES})...", "level": "warn"})
@@ -422,43 +459,6 @@ class App(tk.Tk):
                     monitor.stop()
                 monitor = PopupMonitor(navigator=nav)
                 monitor.start()
-
-                # ---- 3b. 让用户选择登录平台 ----
-                self._platform_event.clear()
-                self._platform_choice = None
-                self._send({"type": "platform_select"})
-                self._send({"type": "log", "text": "请在 GUI 中选择游戏登录平台..."})
-
-                if not self._platform_event.wait(timeout=120):
-                    self._send({"type": "log", "text": "❌ 平台选择超时", "level": "error"})
-                    self._send({"type": "done", "text": "❌ 平台选择超时"})
-                    return
-
-                if self._stop_event.is_set():
-                    return
-
-                platform = self._platform_choice or "qq_ios"
-                platform_display = {
-                    "wx_ios": "微信 iOS", "wx_android": "微信安卓",
-                    "qq_ios": "QQ iOS", "qq_android": "QQ 安卓",
-                }.get(platform, platform)
-                self._send({"type": "log", "text": f"已选择游戏登录平台: {platform_display}"})
-
-                # ---- 3c. 执行游戏内登录 ----
-                def on_game_qr(image=None):
-                    self._send({
-                        "type": "scan_wait",
-                        "title": f"游戏 {platform_display} 登录",
-                        "text": "⏳ 请在游戏窗口中扫码...",
-                    })
-
-                def on_game_status(text):
-                    if "成功" in text:
-                        self._send({"type": "qr_status", "text": text, "color": "green"})
-                    else:
-                        self._send({"type": "qr_status", "text": text})
-                    self._send({"type": "log", "text": text,
-                                "level": "success" if "成功" in text else "info"})
 
                 _log.info(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES}, platform={platform}")
                 monitor.stop()
