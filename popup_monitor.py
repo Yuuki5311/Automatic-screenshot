@@ -42,12 +42,22 @@ class PopupMonitor:
         if self._paused or self.navigator is None:
             return False
         try:
+            # 方式 1: 右上角 X 关闭按钮
             if self.navigator.wait_for_template("popup_close.png", timeout=1):
-                time.sleep(2)  # 等弹窗动画完成
+                time.sleep(2)
                 if self.navigator.find_and_click("popup_close.png", timeout=2):
                     self._closed_count += 1
-                    log.info(f"异步关闭弹窗 #{self._closed_count}")
+                    log.info(f"异步关闭弹窗 #{self._closed_count} (X按钮)")
                     return True
+
+            # 方式 2: 弹窗下方确认按钮
+            if self.navigator.wait_for_template("game_logout_confirm.png", timeout=1):
+                time.sleep(2)
+                if self.navigator.find_and_click("game_logout_confirm.png", timeout=2):
+                    self._closed_count += 1
+                    log.info(f"异步关闭弹窗 #{self._closed_count} (确认按钮)")
+                    return True
+
         except Exception as e:
             log.debug(f"弹窗扫描异常: {e}")
         return False
