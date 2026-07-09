@@ -274,6 +274,13 @@ def game_login(
 
     on_status(f"已选择 {platform_name} 登录")
 
+    # ---- 1a. 检查「登录其他账号」弹窗 ----
+    time.sleep(2)
+    login_other_bounds = (0, int(screen_h * scale * 0.5), int(screen_w * scale), int(screen_h * scale * 0.5))
+    if nav.find_and_click("game_login_other.png", timeout=3, bounds=login_other_bounds):
+        on_status("已点击「登录其他账号」")
+        time.sleep(2)
+
     # ---- 3. 通知 GUI 并等待扫码登录 ----
     if on_qr:
         on_qr()

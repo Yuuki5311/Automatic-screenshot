@@ -447,6 +447,7 @@ class App(tk.Tk):
                             "level": "success" if "成功" in text else "info"})
 
             _log.info(f"[阶段3] 开始游戏登录, platform={platform}")
+            monitor.stop()
             if not game_login(nav, platform, on_game_qr, on_game_status):
                 _log.error("[阶段3] 游戏登录失败")
                 self._send({"type": "log", "text": "❌ 游戏登录失败", "level": "error"})
