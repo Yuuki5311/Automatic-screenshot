@@ -457,11 +457,16 @@ class App(tk.Tk):
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
-            # ---- 停止弹窗监控（阶段 4 自行管理） ----
+            # ---- 停止阶段 1-3 的弹窗监控 ----
             monitor.stop()
-            _log.info("弹窗监控已停止，阶段 4 接管")
+            _log.info("弹窗监控已停止")
 
-            # ====== 阶段 4: 截图 ======
+            # ====== 阶段 4: 截图（带弹窗监控） ======
+            # 启动阶段 4 专属弹窗监控
+            monitor = PopupMonitor(navigator=nav)
+            monitor.start()
+            _log.info("阶段 4 弹窗监控已启动")
+
             avatar_bounds = None
             nobility_bounds = None
 
