@@ -9,13 +9,9 @@
 """
 
 import time
-from io import BytesIO
 from typing import Callable
 
-import cv2
-import numpy as np
 import pyautogui
-from PIL import Image
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -37,8 +33,8 @@ log = get_logger()
 def web_login(
     driver: WebDriver,
     login_type: str,
-    on_qr: Callable[[Image.Image], None],
-    on_status: Callable[[str], None],
+    on_qr: Callable[[], None] | None = None,
+    on_status: Callable[[str], None] | None = None,
     timeout: int = 300,
 ) -> bool:
     """在 gamer.qq.com 完成 QQ / 微信扫码登录。
@@ -54,7 +50,7 @@ def web_login(
     Args:
         driver: Selenium WebDriver 实例。
         login_type: 'qq' 或 'wechat'。
-        on_qr: 截取到二维码时的回调，传入 PIL Image。
+        on_qr: 可选，通知 GUI 等待扫码的回调。
         on_status: 状态更新回调，传入文字描述。
         timeout: 扫码等待超时（秒），默认 5 分钟。
 
@@ -97,9 +93,8 @@ def web_login(
         driver.save_screenshot("debug_login.png")
         return False
 
-    # ---- 4. 切换到 iframe 并截取二维码 ----
+    # ---- 4. 切换到 iframe，提示用户扫码 ----
     try:
-        # 获取所有 iframe
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if not iframes:
             on_status("未找到登录 iframe")
@@ -115,39 +110,17 @@ def web_login(
             driver.switch_to.frame(ptlogin_iframe)
             time.sleep(2)
         except Exception:
-            # 微信登录可能没有 ptlogin_iframe
             pass
 
-        on_status("正在截取登录二维码...")
-        time.sleep(2)
-
-        # 截取整个 iframe 内容（包含二维码）
-        body = driver.find_element(By.TAG_NAME, "body")
-        screenshot_png = body.screenshot_as_png
-        qr_image = Image.open(BytesIO(screenshot_png))
-
-        # 尝试定位二维码图片元素以获得更精确的截图
-        for qr_selector in [
-            "img.qr-img", "img[class*='qrcode']", "img[class*='qr']",
-            "#qrlogin_img", "img[src*='qrcode']", "img[src*='qr']",
-            "canvas", "img",
-        ]:
-            try:
-                qr_elem = driver.find_element(By.CSS_SELECTOR, qr_selector)
-                if qr_elem.is_displayed() and qr_elem.size["width"] > 100:
-                    screenshot_png = qr_elem.screenshot_as_png
-                    qr_image = Image.open(BytesIO(screenshot_png))
-                    break
-            except Exception:
-                continue
-
-        on_qr(qr_image)
-        on_status("请使用手机扫描二维码登录...")
-
     except Exception as e:
-        on_status(f"截取二维码失败: {e}")
+        on_status(f"切换登录 iframe 失败: {e}")
         driver.save_screenshot("debug_qr.png")
         return False
+
+    # 通知 GUI 等待扫码（不截取二维码）
+    if on_qr:
+        on_qr()
+    on_status("请使用手机扫描二维码登录...")
 
     # ---- 5. 轮询等待登录成功 ----
     start = time.time()
@@ -247,22 +220,22 @@ PLATFORM_TEMPLATES = {
 def game_login(
     nav,  # Navigator 实例
     platform: str,
-    on_qr: Callable[[Image.Image], None],
-    on_status: Callable[[str], None],
+    on_qr: Callable[[], None] | None = None,
+    on_status: Callable[[str], None] | None = None,
     timeout: int = 300,
 ) -> bool:
     """在云游戏画面中完成游戏内账号登录。
 
     流程：
         1. 点击用户选择的平台登录按钮
-        2. 截取二维码 → on_qr(image)
+        2. 通知 GUI 等待扫码
         3. 轮询检测登录成功
         4. 点击「进入游戏」
 
     Args:
         nav: Navigator 实例。
         platform: 'wx_ios' | 'wx_android' | 'qq_ios' | 'qq_android'
-        on_qr: 截取到二维码时的回调。
+        on_qr: 可选，通知 GUI 等待扫码的回调。
         on_status: 状态更新回调。
         timeout: 扫码等待超时（秒）。
 
@@ -301,31 +274,24 @@ def game_login(
 
     on_status(f"已选择 {platform_name} 登录")
 
-    # ---- 3. 等待并截取二维码 ----
-    on_status("等待登录二维码...")
+    # ---- 3. 通知 GUI 并等待扫码登录 ----
+    if on_qr:
+        on_qr()
+    on_status(f"请在游戏窗口中扫描 {platform_name} 登录二维码...")
     time.sleep(3)
 
-    qr_detector = cv2.QRCodeDetector()
     start = time.time()
-    qr_sent = False
 
     while time.time() - start < timeout:
-        # 截屏
-        screenshot = pyautogui.screenshot()
-        frame = np.array(screenshot)
-        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
         # ---- 检测登录成功 ----
         if nav.wait_for_template("avatar.png", timeout=2):
             on_status("✅ 游戏登录成功")
             time.sleep(2)
-            # 步骤 4: 点击进入游戏
             if nav.find_and_click("enter_game.png", timeout=10):
                 on_status("✅ 已点击进入游戏")
                 time.sleep(3)
                 return True
             else:
-                # enter_game 可能已自动进入
                 on_status("✅ 游戏登录成功，已进入游戏")
                 time.sleep(3)
                 return True
@@ -335,24 +301,6 @@ def game_login(
                 on_status("✅ 游戏登录成功，已进入游戏")
                 time.sleep(3)
                 return True
-
-        # ---- 截取二维码 ----
-        if not qr_sent:
-            try:
-                data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
-                if bbox is not None and len(bbox) > 0:
-                    pts = bbox.astype(int).reshape(4, 2)
-                    x_min = max(0, pts[:, 0].min() - 20)
-                    y_min = max(0, pts[:, 1].min() - 20)
-                    x_max = min(frame_bgr.shape[1], pts[:, 0].max() + 20)
-                    y_max = min(frame_bgr.shape[0], pts[:, 1].max() + 20)
-
-                    qr_crop = screenshot.crop((x_min, y_min, x_max, y_max))
-                    on_qr(qr_crop)
-                    qr_sent = True
-                    on_status(f"请使用手机扫描 {platform_name} 登录二维码...")
-            except Exception:
-                pass
 
         time.sleep(2)
 

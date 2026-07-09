@@ -258,6 +258,15 @@ class App(tk.Tk):
                 msg.get("status", "⏳ 等待扫码中..."), "gray"
             )
 
+        elif msg_type == "scan_wait":
+            self._show_page("qr")
+            self._qr_display._title_label.config(text=msg.get("title", ""))
+            self._qr_display._image_label.config(image="")
+            self._qr_display._tk_image = None
+            self._qr_display.update_status(
+                msg.get("text", "⏳ 请在浏览器/游戏中扫码..."), "gray"
+            )
+
         elif msg_type == "qr_status":
             self._qr_display.update_status(
                 msg["text"], msg.get("color", "black")
@@ -313,12 +322,11 @@ class App(tk.Tk):
                 login_type = self._login_type.get()
                 _log.info(f"[阶段1] 登录方式: {login_type}")
 
-                def on_qr(image):
+                def on_qr(image=None):
                     self._send({
-                        "type": "qr",
-                        "image": image,
-                        "title": f"第 1/2 步：请扫描腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录二维码",
-                        "status": "⏳ 等待扫码中...",
+                        "type": "scan_wait",
+                        "title": f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录",
+                        "text": "⏳ 请在打开的浏览器窗口中扫码...",
                     })
 
                 def on_status(text):
@@ -409,12 +417,11 @@ class App(tk.Tk):
             self._send({"type": "log", "text": f"已选择游戏登录平台: {platform_display}"})
 
             # ---- 3b. 执行游戏内登录 ----
-            def on_game_qr(image):
+            def on_game_qr(image=None):
                 self._send({
-                    "type": "qr",
-                    "image": image,
-                    "title": f"第 2/2 步：请扫描游戏 {platform_display} 登录二维码",
-                    "status": "⏳ 等待扫码中...",
+                    "type": "scan_wait",
+                    "title": f"游戏 {platform_display} 登录",
+                    "text": "⏳ 请在游戏窗口中扫码...",
                 })
 
             def on_game_status(text):
