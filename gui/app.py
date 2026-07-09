@@ -300,6 +300,7 @@ class App(tk.Tk):
         from game_launcher import launch_game
         from navigator import Navigator
         from screenshotter import Screenshotter
+        from popup_monitor import PopupMonitor
         from logger import get_logger
         import pyautogui
         import os
@@ -307,6 +308,7 @@ class App(tk.Tk):
         _log = get_logger()
         driver = None
         nav = None
+        monitor = None
 
         try:
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -387,7 +389,7 @@ class App(tk.Tk):
                     time.sleep(2)
                     # 点击确认弹窗中的「确定」按钮（屏幕下方 30% 区域搜索）
                     sw, sh = pyautogui.size()
-                    confirm_bounds = (0, int(sh * _nav._scale * 0.7), int(sw * _nav._scale), int(sh * _nav._scale * 0.3))
+                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
                     if not _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds):
                         # 模板未匹配则点击屏幕下方
                         pyautogui.click(int(sw * 0.5), int(sh * 0.75))
@@ -451,6 +453,10 @@ class App(tk.Tk):
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
             # ====== 阶段 4: 截图（复用 main.py 逻辑） ======
+            self._send({"type": "log", "text": "启动弹窗监控..."})
+            monitor = PopupMonitor(navigator=nav)
+            monitor.start()
+
             avatar_bounds = None
             nobility_bounds = None
 
@@ -542,6 +548,9 @@ class App(tk.Tk):
             self._send({"type": "progress", "current": total, "total": total})
             self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})
 
+            # ---- 停止弹窗监控 ----
+            monitor.stop()
+
             # ====== 退出游戏登录 ======
             self._send({"type": "log", "text": "正在退出游戏登录...", "level": "info"})
             # 返回主界面 → 设置 → 退出登录
@@ -562,6 +571,8 @@ class App(tk.Tk):
             self._send({"type": "done", "text": f"❌ 运行异常: {e}"})
             traceback.print_exc()
         finally:
+            if monitor is not None:
+                monitor.stop()
             if driver is not None:
                 driver.quit()
 
