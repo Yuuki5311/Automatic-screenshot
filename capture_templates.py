@@ -54,6 +54,10 @@ TEMPLATES = [
     ("personal_customize.png",   "【个性定制】入口",              "定制页面"),
     ("poke.png",                 "【个性戳戳】入口",              "个性定制页面"),
 
+    # ======== 设置界面 ========
+    ("settings_icon.png",       "设置按钮（右上角齿轮）",       "主界面右上角"),
+    ("settings_logout.png",     "设置页中的「退出登录」按钮（底部）", "设置页面下方"),
+
     # ======== 弹窗相关 ========
     ("popup_close.png",          "弹窗 X 关闭按钮",             "弹窗右上角"),
     ("popup_close_small.png",    "小弹窗 X 关闭按钮",           "小弹窗右上角"),

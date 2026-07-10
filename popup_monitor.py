@@ -71,6 +71,10 @@ class PopupMonitor:
                     kwargs["threshold"] = threshold
 
                 if self.navigator.wait_for_template(template, timeout=1, **kwargs):
+                    # 双重校验：避开过渡动画的瞬时误报
+                    time.sleep(0.1)
+                    if not self.navigator.wait_for_template(template, timeout=0.5, **kwargs):
+                        continue
                     found_any = True
                     time.sleep(2)
                     if self.navigator.find_and_click(template, timeout=2, bounds=bounds, **kwargs):
