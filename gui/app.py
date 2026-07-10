@@ -133,15 +133,46 @@ class App(tk.Tk):
         self._done_summary = ttk.Label(
             self._page_done, text="", font=("", 12)
         )
-        self._done_summary.pack(pady=(40, 10))
-        btn_frame = ttk.Frame(self._page_done)
-        btn_frame.pack(pady=10)
+        self._done_summary.pack(pady=(30, 5))
+
+        # 下一轮确认区
+        self._next_round_frame = ttk.LabelFrame(self._page_done, text="是否执行下一轮？", padding=10)
+        self._next_round_frame.pack(pady=10, fill="x", padx=20)
+
+        # 登录方式
+        ttk.Label(self._next_round_frame, text="登录方式：").pack(anchor="w")
+        self._next_login_type = tk.StringVar(value="qq")
+        next_login_frame = ttk.Frame(self._next_round_frame)
+        next_login_frame.pack(anchor="w", pady=(0, 8))
+        ttk.Radiobutton(next_login_frame, text="QQ", variable=self._next_login_type, value="qq").pack(side="left", padx=(0, 10))
+        ttk.Radiobutton(next_login_frame, text="微信", variable=self._next_login_type, value="wechat").pack(side="left")
+
+        ttk.Label(self._next_round_frame, text="账号：").pack(anchor="w")
+        self._next_account_var = tk.StringVar()
+        ttk.Entry(self._next_round_frame, textvariable=self._next_account_var, width=30).pack(fill="x", pady=(0, 8))
+
+        ttk.Label(self._next_round_frame, text="平台：").pack(anchor="w")
+        self._next_platform_var = tk.StringVar(value="qq_ios")
+        next_platforms = [
+            ("🟢 微信 iOS", "wx_ios"),
+            ("🟢 微信安卓", "wx_android"),
+            ("🔵 QQ iOS", "qq_ios"),
+            ("🔵 QQ 安卓", "qq_android"),
+        ]
+        for text, value in next_platforms:
+            ttk.Radiobutton(
+                self._next_round_frame, text=text,
+                variable=self._next_platform_var, value=value
+            ).pack(anchor="w", pady=1)
+
+        next_btn_frame = ttk.Frame(self._page_done)
+        next_btn_frame.pack(pady=10)
         ttk.Button(
-            btn_frame, text="再跑一轮",
-            command=self._on_rerun, width=15
+            next_btn_frame, text="确认执行下一轮",
+            command=self._on_next_round, width=18
         ).pack(side="left", padx=5)
         ttk.Button(
-            btn_frame, text="退 出",
+            next_btn_frame, text="退 出",
             command=self._on_close, width=15
         ).pack(side="left", padx=5)
 
@@ -203,8 +234,24 @@ class App(tk.Tk):
         )
         self._worker_thread.start()
 
-    def _on_rerun(self):
-        """完成页点击「再跑一轮」—— 从阶段 2.5 开始。"""
+    def _on_next_round(self):
+        """完成页点击「确认执行下一轮」—— 用新设置开始。"""
+        old_login_type = self._login_type.get()
+        new_login_type = self._next_login_type.get()
+
+        # 更新登录方式、账号、平台
+        self._login_type.set(new_login_type)
+        new_account = self._next_account_var.get().strip()
+        if new_account:
+            self._account_var.set(new_account)
+        new_platform = self._next_platform_var.get()
+        self._platform_var.set(new_platform)
+        self._platform_choice = new_platform
+
+        # 登录方式变化 → 需要重新登录腾讯先锋
+        if new_login_type != old_login_type:
+            self._platform_logged_in = False
+
         self._is_rerun = True
         self._on_start()
 
@@ -266,6 +313,10 @@ class App(tk.Tk):
         elif msg_type == "done":
             self._show_page("done")
             self._done_summary.config(text=msg["text"])
+            # 预填新一轮的选项（沿用当前选择）
+            self._next_login_type.set(self._login_type.get())
+            self._next_account_var.set("")
+            self._next_platform_var.set(self._platform_var.get())
 
     # ------------------------------------------------------------------
     # 后台工作流
@@ -526,6 +577,8 @@ class App(tk.Tk):
             monitor.close_all_popups()
             self._send({"type": "log", "text": "弹窗清理完毕，等待 3 秒..."})
             time.sleep(3)
+            monitor.close_all_popups()
+            self._send({"type": "log", "text": "二次确认无弹窗..."})
             # 启动异步弹窗监控，截图全程后台扫描
             monitor.start()
             _log.info("阶段 4 异步弹窗监控已启动")
