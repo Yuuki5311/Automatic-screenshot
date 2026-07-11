@@ -37,3 +37,12 @@ jobs:
           name: AutoScreenshot-Windows
           path: dist/AutoScreenshot.exe
           retention-days: 90
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AutoScreenshot.exe
+          tag_name: nightly
+          name: "Nightly Build"
+          body: "由 GitHub Actions 自动构建的最新 Windows 版本"
+          prerelease: true
