@@ -339,6 +339,7 @@ class App(tk.Tk):
         import pyautogui
         pyautogui.FAILSAFE = False  # 自动化脚本禁用角落保护
         import os
+        import json
 
         _log = get_logger()
         driver = None
@@ -596,10 +597,20 @@ class App(tk.Tk):
             avatar_bounds = (0, 0, int(screen_w * nav._scale * 0.4), int(screen_h * nav._scale * 0.5))
             nobility_bounds = (0, 0, int(screen_w * nav._scale), int(screen_h * nav._scale * 0.5))
 
+            # 加载绝对坐标（缺省值兜底，用户可通过 calibrate_coords.py 覆盖）
+            _coords = {}
+            try:
+                with open(resource_path("calibrated_coords.json"), "r") as f:
+                    _coords = json.load(f)
+            except Exception:
+                pass
+            _avatar_xy = tuple(_coords.get("avatar", [379, 249]))
+            _minion_xy = tuple(_coords.get("minion", [1377, 366]))
+
             # 截图任务（和 main.py 一致）
             screenshot_tasks = [
                 ("主页", [
-                    ("__coords__", "点击左上角头像", (379, 249)),
+                    ("__coords__", "点击左上角头像", _avatar_xy),
                     ("tab_home.png", "点击主页标签"),
                 ], 0),
                 ("英雄", [
@@ -623,7 +634,7 @@ class App(tk.Tk):
                 ("小兵", [
                     ("customize_icon.png", "点击定制"),
                     ("skin_customize.png", "点击皮肤定制"),
-                    ("__coords__", "点击小兵", (1377, 366)),
+                    ("__coords__", "点击小兵", _minion_xy),
                 ], 1),
                 ("个性戳戳", [
                     ("customize_icon.png", "点击定制"),
