@@ -110,7 +110,9 @@ def create_browser(width: int = 1920, height: int = 1080) -> webdriver.Chrome:
     options.add_experimental_option("prefs", prefs)
 
     # ---- webdriver-manager 自动管理 ChromeDriver ----
-    service = Service(ChromeDriverManager().install())
+    service = Service(ChromeDriverManager(
+        driver_repository_url="https://registry.npmmirror.com/-/binary/chrome-for-testing"
+    ).install())
     driver = webdriver.Chrome(service=service, options=options)
 
     # ---- CDP 注入：页面加载前覆盖检测点 ----
