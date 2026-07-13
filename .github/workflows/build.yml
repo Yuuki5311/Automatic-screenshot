@@ -29,7 +29,7 @@ jobs:
 
       - name: 打包 exe
         run: |
-          pyinstaller --onefile --windowed --name AutoScreenshot `
+          pyinstaller --onefile --console --name AutoScreenshot `
             --add-data "templates;templates" `
             --add-data "calibrated_coords.json;." `
             main.py
