@@ -92,7 +92,7 @@ class TestPopupMonitor:
         assert monitor._do_scan.call_count == 5, "应调用恰好 5 次"
 
     def test_close_all_popups_no_popups(self):
-        """当 _do_scan 第一次就返回 False，应立即结束。"""
+        """当 _do_scan 两次都返回 False，应确认干净后退出。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
@@ -102,23 +102,24 @@ class TestPopupMonitor:
 
         result = monitor.close_all_popups(max_rounds=10)
         assert result == 0, "无弹窗应返回 0"
-        assert monitor._do_scan.call_count == 1, "应只调用一次就退出"
+        # 第一次扫描 + 3s 后验证扫描
+        assert monitor._do_scan.call_count == 2, "应调用两次（扫描+验证）"
 
     def test_close_all_popups_stops_after_clean(self):
-        """弹窗关完后应立即停止，不跑满 max_rounds。"""
+        """弹窗关完后应等待 3s 再验证一次，确认干净后停止。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
         nav._scale = 2.0
         monitor = PopupMonitor(navigator=nav)
 
-        # 前 3 次有弹窗，第 4 次清理完毕
-        monitor._do_scan = Mock(side_effect=[True, True, True, False])
+        # 前 3 次有弹窗，第 4 次无弹窗，第 5 次验证仍无弹窗
+        monitor._do_scan = Mock(side_effect=[True, True, True, False, False])
 
         result = monitor.close_all_popups(max_rounds=10)
         assert result == 3, "应返回 3 次关闭"
-        assert monitor._do_scan.call_count == 4, \
-            "应调用 4 次（3 次 True + 1 次确认干净）"
+        assert monitor._do_scan.call_count == 5, \
+            "应调用 5 次（3 次 True + 无弹窗 + 验证确认）"
 
 
 # ========== 平台选择 bounds 计算测试 ==========
@@ -198,9 +199,8 @@ class TestPopupThresholds:
         assert "game_logout_confirm.png" in source, "应包含 game_logout_confirm.png"
         assert "game_popup_confirm.png" in source, "应包含 game_popup_confirm.png"
 
-        # 验证高阈值按钮
-        assert "0.70" in source or "0.7" in source, "popup_close 应有 0.70 阈值"
-        assert "0.75" in source, "popup_close_small 应有 0.75 阈值"
+        # 验证高阈值按钮（高于默认 0.53 以减少误匹配）
+        assert "0.85" in source, "popup_close 应有 0.85 阈值"
 
 
 # ========== Navigator threshold 参数兼容性测试 ==========

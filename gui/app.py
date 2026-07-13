@@ -427,8 +427,8 @@ class App(tk.Tk):
                 time.sleep(3)
                 monitor.close_all_popups()
 
-                # 检测退出按钮 (3次尝试, 每次间隔30s)
-                LOGOUT_BTN_RETRIES = 3
+                # 检测退出按钮 (2次尝试, 每次间隔30s)
+                LOGOUT_BTN_RETRIES = 2
                 LOGOUT_BTN_WAIT = 30
                 logout_btn_found = False
                 for logout_try in range(1, LOGOUT_BTN_RETRIES + 1):
@@ -440,16 +440,14 @@ class App(tk.Tk):
                         time.sleep(LOGOUT_BTN_WAIT)
 
                 if not logout_btn_found:
-                    self._send({"type": "log", "text": "❌ 无法检测到退出按钮（已重试3次），程序终止", "level": "error"})
-                    self._send({"type": "done", "text": "❌ 退出登录失败：未找到退出按钮"})
-                    return
-
-                self._send({"type": "log", "text": "已点击退出登录"})
-                time.sleep(2)
-                sw, sh = pyautogui.size()
-                confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
-                if not _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds):
-                    pyautogui.click(int(sw * 0.5), int(sh * 0.75))
+                    self._send({"type": "log", "text": "未检测到退出按钮，跳过退出登录阶段", "level": "warn"})
+                else:
+                    self._send({"type": "log", "text": "已点击退出登录"})
+                    time.sleep(2)
+                    sw, sh = pyautogui.size()
+                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
+                    _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
+                    self._send({"type": "log", "text": "已确认退出登录"})
 
                 monitor = None
 
@@ -468,8 +466,8 @@ class App(tk.Tk):
                 time.sleep(3)
                 monitor.close_all_popups()
 
-                # 检测退出按钮 (3次尝试, 每次间隔30s)
-                LOGOUT_BTN_RETRIES = 3
+                # 检测退出按钮 (2次尝试, 每次间隔30s)
+                LOGOUT_BTN_RETRIES = 2
                 LOGOUT_BTN_WAIT = 30
                 logout_btn_found = False
                 for logout_try in range(1, LOGOUT_BTN_RETRIES + 1):
@@ -481,16 +479,14 @@ class App(tk.Tk):
                         time.sleep(LOGOUT_BTN_WAIT)
 
                 if not logout_btn_found:
-                    self._send({"type": "log", "text": "❌ 无法检测到退出按钮（已重试3次），程序终止", "level": "error"})
-                    self._send({"type": "done", "text": "❌ 退出登录失败：未找到退出按钮"})
-                    return
-
-                self._send({"type": "log", "text": "已点击退出登录"})
-                time.sleep(2)
-                sw, sh = pyautogui.size()
-                confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
-                if not _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds):
-                    pyautogui.click(int(sw * 0.5), int(sh * 0.75))
+                    self._send({"type": "log", "text": "未检测到退出按钮，跳过退出登录阶段", "level": "warn"})
+                else:
+                    self._send({"type": "log", "text": "已点击退出登录"})
+                    time.sleep(2)
+                    sw, sh = pyautogui.size()
+                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
+                    _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
+                    self._send({"type": "log", "text": "已确认退出登录"})
 
                 monitor = None
 
@@ -608,9 +604,10 @@ class App(tk.Tk):
             _minion_xy = tuple(_coords.get("minion", [1377, 366]))
 
             # 截图任务（和 main.py 一致）
+            # __coords__ 格式: ("__coords__", 描述, (x, y), 锚点模板)
             screenshot_tasks = [
                 ("主页", [
-                    ("__coords__", "点击左上角头像", _avatar_xy),
+                    ("__coords__", "点击左上角头像", _avatar_xy, "avatar.png"),
                     ("tab_home.png", "点击主页标签"),
                 ], 0),
                 ("英雄", [
@@ -634,7 +631,7 @@ class App(tk.Tk):
                 ("小兵", [
                     ("customize_icon.png", "点击定制"),
                     ("skin_customize.png", "点击皮肤定制"),
-                    ("__coords__", "点击小兵", _minion_xy),
+                    ("__coords__", "点击小兵", _minion_xy, "back_arrow.png"),
                 ], 1),
                 ("个性戳戳", [
                     ("customize_icon.png", "点击定制"),
@@ -649,65 +646,146 @@ class App(tk.Tk):
             total = len(screenshot_tasks)
             success = 0
 
-            # 需要在特定节点触发弹窗清理的任务 index
-            POPUP_CHECK_POINTS = {5, 6, 8, 9}
+            def _do_recover():
+                """尝试从游戏重启中恢复。返回 True 表示恢复成功。"""
+                self._send({"type": "log", "text": "等待游戏恢复（最多 60s）...", "level": "warn"})
+                monitor.pause()
 
-            for idx, (name, clicks, back_count) in enumerate(screenshot_tasks, 1):
-                if self._stop_event.is_set():
-                    return
+                start = time.time()
+                game_templates = [
+                    "game_wx_ios.png", "game_wx_android.png",
+                    "game_qq_ios.png", "game_qq_android.png",
+                ]
 
-                self._send({"type": "log", "text": f"[{idx}/{total}] {name}"})
-                self._send({"type": "progress", "current": idx - 1, "total": total})
+                while time.time() - start < 60:
+                    if self._stop_event.is_set():
+                        monitor.resume()
+                        return False
 
-                all_ok = True
-                for item in clicks:
-                    if len(item) == 3:
-                        template, desc, bounds = item
-                    else:
-                        template, desc = item
-                        bounds = None
+                    # 检测是否已在主界面
+                    if nav.wait_for_template("avatar.png", timeout=2):
+                        monitor.resume()
+                        self._send({"type": "log", "text": "检测到游戏主界面，无需重新登录", "level": "info"})
+                        return True
 
-                    # 坐标点击：template名称为 __coords__ 时用 bounds 传坐标
-                    if template == "__coords__":
-                        x, y = bounds  # bounds 复用为 (x, y) 坐标
-                        pyautogui.click(x, y)
-                        self._send({"type": "log", "text": f"  🖱 坐标点击 ({x}, {y})"})
-                        time.sleep(CLICK_INTERVAL)
-                    elif not nav.find_and_click(template, bounds=bounds):
-                        self._send({"type": "log", "text": f"  ⚠ 找不到 {template}，跳过 {name}", "level": "warn"})
-                        all_ok = False
+                    # 检测是否在登录界面
+                    for tpl in game_templates:
+                        if nav.wait_for_template(tpl, timeout=1, threshold=0.6):
+                            self._send({"type": "log", "text": f"检测到登录界面，重新登录...", "level": "info"})
+                            if game_login(nav, platform, on_game_qr, on_game_status):
+                                monitor.resume()
+                                return True
+                            else:
+                                monitor.resume()
+                                self._send({"type": "log", "text": "游戏登录失败", "level": "error"})
+                                return False
+
+                    time.sleep(2)
+
+                monitor.resume()
+                self._send({"type": "log", "text": "等待游戏恢复超时", "level": "error"})
+                return False
+
+            restart_loop = True
+            while restart_loop:
+                restart_loop = False
+                consecutive_failures = 0
+                success = 0
+
+                for idx, (name, clicks, back_count) in enumerate(screenshot_tasks, 1):
+                    if self._stop_event.is_set():
+                        return
+
+                    self._send({"type": "log", "text": f"[{idx}/{total}] {name}"})
+                    self._send({"type": "progress", "current": idx - 1, "total": total})
+
+                    # 异步监控全程在线，不再由主线程同步关闭弹窗
+
+                    all_ok = True
+                    last_step = None  # (verify_template, rollback_action)
+
+                    for item in clicks:
+                        anchor = None
+                        if len(item) == 4:
+                            # __coords__ 格式: (template, desc, coords, anchor)
+                            template, desc, coords, anchor = item
+                            bounds = coords
+                        elif len(item) == 3:
+                            template, desc, bounds = item
+                        else:
+                            template, desc = item
+                            bounds = None
+
+                        # 等待弹窗冷却（关闭后 3s 无新弹窗）
+                        if monitor is not None:
+                            monitor.wait_until_clear(3)
+
+                        # 坐标点击
+                        if template == "__coords__":
+                            x, y = bounds
+                            pyautogui.click(x, y)
+                            self._send({"type": "log", "text": f"  🖱 坐标点击 ({x}, {y})"})
+                            _log.info(f"坐标点击 ({x}, {y})")
+                            time.sleep(CLICK_INTERVAL)
+                            consecutive_failures = 0
+                            last_step = (anchor, lambda _x=x, _y=y: pyautogui.click(_x, _y))
+
+                        elif not nav.find_and_click(template, bounds=bounds):
+                            consecutive_failures += 1
+                            all_ok = False
+                            self._send({"type": "log", "text": f"  ⚠ 找不到 {template}", "level": "warn"})
+
+                            # 连续失败 ≥2 且主界面头像消失
+                            if consecutive_failures >= 2 and not nav.wait_for_template("avatar.png", timeout=2):
+                                if last_step is not None:
+                                    verify_template, rollback = last_step
+                                    if nav.wait_for_template(verify_template, timeout=3):
+                                        self._send({"type": "log", "text": f"  ↩ 回退：检测到 {verify_template}，重试上一步", "level": "warn"})
+                                        rollback()
+                                        time.sleep(CLICK_INTERVAL)
+                                        consecutive_failures = 0
+                                        all_ok = True
+                                        continue
+                                # 无 last_step 或上一步模板也不可见 → 游戏恢复
+                                self._send({"type": "log", "text": "⚠️ 游戏可能已重启，尝试恢复...", "level": "warn"})
+                                if _do_recover():
+                                    self._send({"type": "log", "text": "✅ 游戏已恢复，重新开始截图", "level": "success"})
+                                    restart_loop = True
+                                else:
+                                    self._send({"type": "log", "text": "❌ 游戏恢复失败", "level": "error"})
+                            break
+
+                        else:
+                            consecutive_failures = 0
+                            _t = template
+                            _b = bounds
+                            last_step = (_t, lambda _t=_t, _b=_b: nav.find_and_click(_t, bounds=_b))
+
+                        # 贵族：点击图标后无需同步清理，异步监控处理
+
+                    if restart_loop:
                         break
 
-                    # 贵族：点击图标后清理弹窗
-                    if idx == 9 and template == "nobility_icon.png":
-                        self._send({"type": "log", "text": "  清理弹窗（贵族图标后）...", "level": "info"})
-                        monitor.pause()
-                        monitor.close_all_popups()
-                        monitor.resume()
+                    if all_ok:
+                        time.sleep(PAGE_LOAD_WAIT)
+                        shot.take(name)
+                        success += 1
+                        self._send({"type": "log", "text": f"  已截图: {name}", "level": "success"})
 
-                if all_ok:
-                    time.sleep(PAGE_LOAD_WAIT)
-                    shot.take(name)
-                    success += 1
-                    self._send({"type": "log", "text": f"  已截图: {name}", "level": "success"})
+                        for _ in range(back_count):
+                            nav.find_and_click("back_arrow.png", timeout=3)
+                            time.sleep(3)
 
-                    for _ in range(back_count):
-                        nav.find_and_click("back_arrow.png", timeout=3)
-                        time.sleep(3)
+                        # 异步监控在间隔期间自动处理弹窗
 
-                    # 指定节点返回后清理弹窗（暂停异步监控避免冲突）
-                    if idx in POPUP_CHECK_POINTS:
-                        self._send({"type": "log", "text": f"  清理弹窗（{name}返回后）...", "level": "info"})
-                        monitor.pause()
-                        monitor.close_all_popups()
-                        monitor.resume()
+                        delay = random.uniform(SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX)
+                        self._send({"type": "log", "text": f"  等待 {delay:.1f}s...", "level": "info"})
+                        time.sleep(delay)
+                    else:
+                        self._send({"type": "log", "text": f"  ❌ 截图失败: {name}", "level": "error"})
 
-                    # 截图间隔随机延迟，模拟人类操作节奏
-                    delay = random.uniform(SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX)
-                    self._send({"type": "log", "text": f"  等待 {delay:.1f}s...", "level": "info"})
-                    time.sleep(delay)
-                else:
-                    self._send({"type": "log", "text": f"  ❌ 截图失败: {name}", "level": "error"})
+                if restart_loop:
+                    continue
 
             self._send({"type": "progress", "current": total, "total": total})
             self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})

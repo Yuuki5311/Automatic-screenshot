@@ -146,7 +146,7 @@ def web_login(
                 driver.save_screenshot("debug_login_success.png")
                 return True
             except Exception:
-                pass  # 真正的瞬态错误，继续轮询
+                log.debug(f"检测登录弹窗状态异常，继续轮询", exc_info=True)
 
             # ---- 5b. Cookie 检测 ----
             cookies = driver.get_cookies()
@@ -175,7 +175,7 @@ def web_login(
                     driver.save_screenshot("debug_login_success.png")
                     return True
             except Exception:
-                pass
+                log.debug(f"JS检测用户元素异常", exc_info=True)
 
             # ---- 5d. CSS 检测用户元素 ----
             user_selectors = [
@@ -193,10 +193,11 @@ def web_login(
                             driver.save_screenshot("debug_login_success.png")
                             return True
                 except Exception:
+                    log.debug(f"CSS选择器 {sel} 检测异常", exc_info=True)
                     continue
 
         except Exception:
-            pass
+            log.debug(f"登录轮询外层异常，继续尝试", exc_info=True)
 
         time.sleep(2)
 
@@ -336,7 +337,7 @@ def game_login(
                     on_status("✅ 检测到登录二维码")
                 del frame_bgr
             except Exception:
-                pass
+                log.debug(f"二维码检测异常", exc_info=True)
 
             # 15 秒内未出现二维码 → 返回失败，触发重试
             if time.time() - start > QR_CODE_TIMEOUT:

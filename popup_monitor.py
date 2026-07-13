@@ -56,8 +56,8 @@ class PopupMonitor:
             # (模板文件, 搜索区域, 标签, 置信度阈值)
             # 阈值None则使用Navigator默认值(0.53)
             buttons = [
-                ("popup_close.png", top_bounds, "X按钮", 0.70),
-                ("popup_close_small.png", top_bounds, "小弹窗X按钮", 0.75),
+                ("popup_close.png", top_bounds, "X按钮", 0.85),
+                ("popup_close_small.png", top_bounds, "小弹窗X按钮", 0.85),
                 ("game_logout_confirm.png", bottom_bounds, "确认按钮", None),
                 ("game_popup_confirm.png", bottom_bounds, "通用确认", None),
             ]
@@ -71,13 +71,16 @@ class PopupMonitor:
                     kwargs["threshold"] = threshold
 
                 if self.navigator.wait_for_template(template, timeout=1, **kwargs):
-                    # 双重校验：避开过渡动画的瞬时误报
-                    time.sleep(0.1)
+                    # 双重校验：等待 0.5s 后再次确认
+                    # 按钮在弹窗出现后 0.5~1s 内处于禁用状态
+                    time.sleep(0.5)
                     if not self.navigator.wait_for_template(template, timeout=0.5, **kwargs):
                         continue
                     found_any = True
+                    # 等待按钮完全可点击（距首次检测至少 1s）
                     time.sleep(2)
                     if self.navigator.find_and_click(template, timeout=2, bounds=bounds, **kwargs):
+                        # 关闭后等待 0.5s 冷却期
                         time.sleep(1)
                         if not self.navigator.wait_for_template(template, timeout=1, **kwargs):
                             self._closed_count += 1
@@ -92,7 +95,7 @@ class PopupMonitor:
                 log.debug("兜底：点击空白区域尝试消除弹窗")
                 pyautogui.click(int(sw * 0.5), int(sh * 0.85))
 
-            return found_any
+            return closed_this_round > 0
 
         except Exception as e:
             log.debug(f"弹窗扫描异常: {e}")
@@ -115,9 +118,9 @@ class PopupMonitor:
     # ------------------------------------------------------------------
 
     def close_all_popups(self, max_rounds: int = 10) -> int:
-        """同步关闭所有可见弹窗（仅阶段4使用）。
+        """同步关闭所有可见弹窗。
 
-        循环扫描 → 关闭 → 等待 → 再检查，直到没有新弹窗出现。
+        循环扫描 → 关闭 → 等待3s → 确认无新弹窗 → 继续执行。
         绕过暂停检查，直接执行扫描，不与后台线程冲突。
 
         Args:
@@ -129,11 +132,41 @@ class PopupMonitor:
         closed = 0
         for _ in range(max_rounds):
             if not self._do_scan():
-                break
+                # 等待 3s 后二次确认，防止弹窗动画延迟出现
+                time.sleep(3)
+                if not self._do_scan():
+                    break
             closed += 1
             time.sleep(3)
         if closed > 0:
             log.info(f"弹窗清理完成，共关闭 {closed} 个")
+        return closed
+
+    def wait_until_clear(self, seconds: float = 3.0) -> int:
+        """同步等待弹窗区域冷静。
+
+        持续扫描弹窗，发现后立即关闭，直到连续 ``seconds`` 秒
+        没有出现新弹窗才返回。在截图工作流中的每个导航步骤前调用，
+        确保弹窗关闭动画和级联弹窗都处理完毕。
+
+        Args:
+            seconds: 需要的冷静时长（秒）。
+
+        Returns:
+            int: 在此期间关闭的弹窗数量。
+        """
+        closed = 0
+        quiet_since = time.time()
+
+        while time.time() - quiet_since < seconds:
+            if self._do_scan():
+                closed += 1
+                quiet_since = time.time()
+            else:
+                time.sleep(1)
+
+        if closed > 0:
+            log.info(f"冷却等待完成，共关闭 {closed} 个弹窗")
         return closed
 
     def start(self):
