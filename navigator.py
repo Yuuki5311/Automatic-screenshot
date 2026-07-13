@@ -5,6 +5,7 @@
 自动处理 Retina 显示的坐标缩放。
 """
 
+import os
 import time
 import cv2
 import numpy as np
@@ -78,7 +79,7 @@ class Navigator:
 
     def _template_path(self, template_name: str) -> str:
         """构建模板文件的完整路径。"""
-        return f"{self.templates_dir}/{template_name}"
+        return os.path.join(self.templates_dir, template_name)
 
     def _load_template(self, template_name: str) -> np.ndarray | None:
         """加载模板图片，优先从缓存获取。

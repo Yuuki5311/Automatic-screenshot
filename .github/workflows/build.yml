@@ -29,7 +29,25 @@ jobs:
 
       - name: 打包 exe
         run: |
-          pyinstaller --onefile --console --name AutoScreenshot `
+          pyinstaller --onefile --windowed --name AutoScreenshot `
+            --hidden-import tkinter `
+            --hidden-import tkinter.ttk `
+            --hidden-import cv2 `
+            --hidden-import cv2._core `
+            --hidden-import numpy `
+            --hidden-import numpy._core `
+            --hidden-import PIL `
+            --hidden-import PIL.Image `
+            --hidden-import PIL.ImageTk `
+            --hidden-import selenium `
+            --hidden-import selenium.webdriver.chrome.service `
+            --hidden-import selenium.webdriver.chrome.options `
+            --hidden-import webdriver_manager `
+            --hidden-import webdriver_manager.chrome `
+            --hidden-import webdriver_manager.core.os_manager `
+            --hidden-import urllib3 `
+            --hidden-import requests `
+            --hidden-import certifi `
             --add-data "templates;templates" `
             --add-data "calibrated_coords.json;." `
             main.py
