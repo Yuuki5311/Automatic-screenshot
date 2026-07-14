@@ -5,6 +5,7 @@
 """
 
 import platform
+import re
 import subprocess
 
 from selenium import webdriver
@@ -75,6 +76,49 @@ window.navigator.permissions.query = (parameters) => (
 """
 
 
+def _get_chrome_version() -> str | None:
+    """获取本地 Chrome 主版本号，失败返回 None。"""
+    system = platform.system()
+    commands: list[list[str]] = []
+    if system == "Darwin":
+        commands = [
+            ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "--version"],
+        ]
+    elif system == "Windows":
+        commands = [
+            [r'reg', 'query', r'HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon', '/v', 'version'],
+            [r'chrome', '--version'],
+        ]
+    else:
+        commands = [
+            ["google-chrome", "--version"],
+            ["chromium-browser", "--version"],
+        ]
+
+    for cmd in commands:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                m = re.search(r'([\d]+)\.', result.stdout)
+                if m:
+                    return m.group(1)
+        except Exception:
+            continue
+
+    # Windows fallback: parse registry string "0x00011000 REG_SZ 150.0..."
+    if system == "Windows":
+        for cmd in commands:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                m = re.search(r'REG_SZ\s+([\d]+)\.', result.stdout)
+                if m:
+                    return m.group(1)
+            except Exception:
+                continue
+
+    return None
+
+
 def create_browser(width: int = 1920, height: int = 1080) -> webdriver.Chrome:
     """创建配置了反检测措施的 Chrome 浏览器实例。
 
@@ -110,9 +154,32 @@ def create_browser(width: int = 1920, height: int = 1080) -> webdriver.Chrome:
     options.add_experimental_option("prefs", prefs)
 
     # ---- webdriver-manager 自动管理 ChromeDriver ----
-    service = Service(ChromeDriverManager(
-        driver_repository_url="https://registry.npmmirror.com/-/binary/chrome-for-testing"
-    ).install())
+    # 传入 driver_version 跳过 googlechromelabs.github.io 版本检测（国内被墙）
+    _chrome_ver = _get_chrome_version()
+    _driver_path = ChromeDriverManager(
+        url="https://registry.npmmirror.com/-/binary/chrome-for-testing",
+        driver_version=_chrome_ver,
+    ).install()
+
+    # macOS Gatekeeper 会阻止未签名 chromedriver 运行 (status code -9)
+    if platform.system() == "Darwin":
+        import os as _os
+        _driver_bin = _driver_path
+        # install() 返回的可能是目录，找到实际二进制
+        if _os.path.isdir(_driver_path):
+            for _f in _os.listdir(_driver_path):
+                if _f.startswith("chromedriver"):
+                    _driver_bin = _os.path.join(_driver_path, _f)
+                    break
+        subprocess.run(["xattr", "-c", _driver_bin], capture_output=True)
+        subprocess.run(["chmod", "+x", _driver_bin], capture_output=True)
+        # macOS 15+ 拒绝外部 ad-hoc 签名，需本地重签
+        subprocess.run(
+            ["codesign", "--sign", "-", "--force", _driver_bin],
+            capture_output=True,
+        )
+
+    service = Service(_driver_path)
     driver = webdriver.Chrome(service=service, options=options)
 
     # ---- CDP 注入：页面加载前覆盖检测点 ----

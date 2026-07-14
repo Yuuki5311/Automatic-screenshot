@@ -16,6 +16,11 @@ logs/
 # 调试截图
 debug_*.png
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 # IDE
 .vscode/
 .idea/
