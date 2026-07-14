@@ -329,7 +329,7 @@ class App(tk.Tk):
     def _run_workflow(self):
         """后台线程：执行完整的登录 → 截图工作流。"""
         from browser import create_browser
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, CLICK_INTERVAL, TEMPLATES_DIR, SCREENSHOTS_DIR, SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX, resource_path
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, CLICK_INTERVAL, TEMPLATES_DIR, SCREENSHOTS_DIR, SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX, resource_path, writable_dir
         from login import web_login, game_login
         from game_launcher import launch_game
         from navigator import Navigator
@@ -586,7 +586,7 @@ class App(tk.Tk):
             account = self._account_var.get().strip()
             if not account:
                 account = f"unknown_{time.strftime('%H%M%S')}"
-            shot = Screenshotter(output_dir=os.path.join(resource_path(SCREENSHOTS_DIR), account))
+            shot = Screenshotter(output_dir=os.path.join(writable_dir(), account))
 
             screen_w, screen_h = pyautogui.size()
             # Intentional private attr access (avoids public API change to Navigator in this task)

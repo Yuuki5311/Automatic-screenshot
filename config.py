@@ -54,3 +54,18 @@ def resource_path(relative_path: str) -> str:
     else:
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative_path)
+
+
+def writable_dir(subdir: str = "") -> str:
+    """获取可写目录路径，兼容开发环境和 PyInstaller 打包。
+
+    PyInstaller 打包后，sys._MEIPASS 是只读临时目录，不能写入。
+    因此输出文件（截图、日志等）需要放到外部可写位置。
+    开发环境下使用项目根目录。
+    """
+    if getattr(sys, 'frozen', False):
+        base = os.path.expanduser("~/Desktop")
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base, subdir) if subdir else base
+    return path
