@@ -44,6 +44,10 @@ jobs:
             --hidden-import selenium.webdriver.chrome.options `
             --hidden-import selenium.webdriver.edge.service `
             --hidden-import selenium.webdriver.edge.options `
+            --hidden-import selenium.webdriver.edge.webdriver `
+            --hidden-import selenium.webdriver.chromium `
+            --hidden-import selenium.webdriver.chromium.webdriver `
+            --hidden-import selenium.webdriver.common.desired_capabilities `
             --hidden-import webdriver_manager `
             --hidden-import webdriver_manager.chrome `
             --hidden-import webdriver_manager.microsoft `
