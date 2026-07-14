@@ -155,7 +155,8 @@ def create_browser(width: int = 1920, height: int = 1080) -> webdriver.Chrome:
 
     # ---- webdriver-manager 自动管理 ChromeDriver ----
     # 传入 driver_version 跳过 googlechromelabs.github.io 版本检测（国内被墙）
-    _chrome_ver = _get_chrome_version()
+    # 本地检测失败时使用硬编码版本号，防止退化到被墙 API 导致超时卡死
+    _chrome_ver = _get_chrome_version() or "150"
     _driver_path = ChromeDriverManager(
         url="https://registry.npmmirror.com/-/binary/chrome-for-testing",
         driver_version=_chrome_ver,
