@@ -48,10 +48,18 @@ class PopupMonitor:
         if self.navigator is None:
             return False
         try:
-            sw, sh = pyautogui.size()
-            scale = self.navigator._scale
-            top_bounds = (0, 0, int(sw * scale), int(sh * scale * 0.5))
-            bottom_bounds = (0, int(sh * scale * 0.5), int(sw * scale), int(sh * scale * 0.5))
+            if self.navigator.driver is not None:
+                # Selenium 截图：CSS 像素固定尺寸
+                from config import BROWSER_WIDTH, BROWSER_HEIGHT
+                css_w, css_h = BROWSER_WIDTH, BROWSER_HEIGHT
+                top_bounds = (0, 0, css_w, css_h // 2)
+                bottom_bounds = (0, css_h // 2, css_w, css_h // 2)
+            else:
+                # 回退：PyAutoGUI 物理像素
+                sw, sh = pyautogui.size()
+                scale = self.navigator._scale
+                top_bounds = (0, 0, int(sw * scale), int(sh * scale * 0.5))
+                bottom_bounds = (0, int(sh * scale * 0.5), int(sw * scale), int(sh * scale * 0.5))
 
             # (模板文件, 搜索区域, 标签, 置信度阈值)
             # 阈值None则使用Navigator默认值(0.53)
