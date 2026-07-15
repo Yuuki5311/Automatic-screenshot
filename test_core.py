@@ -269,6 +269,104 @@ class TestScreenshotTasks:
                     assert template.endswith(".png"), f"{name} 模板 {template} 应为 .png"
 
 
+# ========== Navigator Selenium 截图路径测试 ==========
+
+class TestNavigatorSeleniumScreenshot:
+    """测试 Navigator 在 Selenium 截图模式下的行为。"""
+
+    def test_init_with_driver_sets_window_offset(self):
+        """传入 driver 时应正确设置 window_offset。"""
+        from navigator import Navigator
+
+        mock_driver = Mock()
+        nav = Navigator(
+            templates_dir=TEMPLATES_DIR,
+            driver=mock_driver,
+            window_offset=(-32000, -32000),
+        )
+        assert nav.driver is mock_driver
+        assert nav.window_offset_x == -32000
+        assert nav.window_offset_y == -32000
+        assert nav._scale is None  # Selenium 模式不需要 scale
+
+    def test_init_without_driver_still_works(self):
+        """不传 driver 时向后兼容（PyAutoGUI 回退）。"""
+        from navigator import Navigator
+
+        nav = Navigator(templates_dir=TEMPLATES_DIR)
+        assert nav.driver is None
+        assert nav.window_offset_x == 0
+        assert nav.window_offset_y == 0
+
+    def test_get_screenshot_selenium_path(self):
+        """driver 存在时应调用 get_screenshot_as_png。"""
+        from navigator import Navigator
+        import numpy as np
+
+        # 构造一个 100x100 的纯白 PNG
+        import struct
+        import zlib
+
+        def create_png(w, h):
+            def chunk(ctype, data):
+                c = ctype + data
+                crc = struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+                return struct.pack('>I', len(data)) + c + crc
+            raw = b''
+            for y in range(h):
+                raw += b'\x00' + b'\xff\xff\xff' * w
+            return (b'\x89PNG\r\n\x1a\n'
+                    + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+                    + chunk(b'IDAT', zlib.compress(raw))
+                    + chunk(b'IEND', b''))
+
+        png = create_png(100, 100)
+        mock_driver = Mock()
+        mock_driver.get_screenshot_as_png = Mock(return_value=png)
+
+        nav = Navigator(templates_dir=TEMPLATES_DIR, driver=mock_driver)
+        result = nav._get_screenshot()
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (100, 100, 3)  # BGR 3 通道
+        mock_driver.get_screenshot_as_png.assert_called_once()
+
+
+class TestScreenshotterSelenium:
+    """测试 Screenshotter 的 Selenium 截图路径。"""
+
+    def test_take_with_driver_uses_selenium(self):
+        """driver 存在时应使用 get_screenshot_as_png。"""
+        import tempfile
+        from screenshotter import Screenshotter
+
+        mock_driver = Mock()
+        mock_driver.get_screenshot_as_png = Mock(return_value=b'\x89PNG\r\n\x1a\n')
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shot = Screenshotter(output_dir=tmpdir, driver=mock_driver)
+            filepath = shot.take("test_screenshot")
+
+            assert os.path.exists(filepath)
+            mock_driver.get_screenshot_as_png.assert_called_once()
+
+    def test_take_without_driver_falls_back(self):
+        """driver 为 None 时应回退到 pyautogui.screenshot。"""
+        import tempfile
+        from screenshotter import Screenshotter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("pyautogui.screenshot") as mock_screenshot:
+                from PIL import Image
+                mock_screenshot.return_value = Image.new("RGB", (100, 100))
+
+                shot = Screenshotter(output_dir=tmpdir)
+                filepath = shot.take("test_fallback")
+
+                assert os.path.exists(filepath)
+                mock_screenshot.assert_called_once()
+
+
 if __name__ == "__main__":
     # 简易测试运行器
     import traceback
@@ -280,6 +378,8 @@ if __name__ == "__main__":
         TestPopupThresholds(),
         TestNavigatorThreshold(),
         TestScreenshotTasks(),
+        TestNavigatorSeleniumScreenshot(),
+        TestScreenshotterSelenium(),
     ]
 
     passed = 0
