@@ -110,9 +110,14 @@ class Navigator:
     def _click_at(self, css_x: int, css_y: int) -> None:
         """CSS 像素坐标 → 屏幕绝对坐标 → 鼠标点击。
 
-        css_x, css_y 为模板匹配结果在 Selenium 截图（CSS 像素）
-        中的坐标。加上窗口偏移后得到屏幕绝对坐标。
+        css_x, css_y 为模板匹配结果在截图中的坐标。
+        Selenium 路径下为 CSS 像素，PyAutoGUI 回退路径下为物理像素（需除 scale）。
+        加上窗口偏移后得到屏幕绝对坐标。
         """
+        if self._scale is not None:
+            # PyAutoGUI 回退：物理像素 → 逻辑坐标
+            css_x = int(css_x / self._scale)
+            css_y = int(css_y / self._scale)
         screen_x = int(css_x + self.window_offset_x)
         screen_y = int(css_y + self.window_offset_y)
         pyautogui.click(screen_x, screen_y)
