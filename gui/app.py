@@ -418,7 +418,11 @@ class App(tk.Tk):
                 # ---- 3a. 退出当前登录（仅首次，防止自动登录残留） ----
                 self._send({"type": "log", "text": "等待游戏窗口..."})
                 time.sleep(2)
-                _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+                _nav = Navigator(
+                    templates_dir=resource_path(TEMPLATES_DIR),
+                    driver=driver,
+                    window_offset=(0, 0),
+                )
                 monitor = PopupMonitor(navigator=_nav)
 
                 # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 执行退出
@@ -458,7 +462,11 @@ class App(tk.Tk):
                     return
 
                 self._send({"type": "log", "text": "正在退出当前游戏登录...", "level": "info"})
-                _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+                _nav = Navigator(
+                    templates_dir=resource_path(TEMPLATES_DIR),
+                    driver=driver,
+                    window_offset=(0, 0),
+                )
                 monitor = PopupMonitor(navigator=_nav)
 
                 # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 执行退出
@@ -499,7 +507,11 @@ class App(tk.Tk):
                 _nav.cleanup()
 
             self._send({"type": "log", "text": "等待游戏窗口..."})
-            nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+            nav = Navigator(
+                templates_dir=resource_path(TEMPLATES_DIR),
+                driver=driver,
+                window_offset=(0, 0),
+            )
 
             # ====== 阶段 3: 游戏登录（最多重试 3 次） ======
             GAME_LOGIN_MAX_RETRIES = 3
@@ -538,7 +550,7 @@ class App(tk.Tk):
                     monitor = None
 
                 _log.info(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES}, platform={platform}")
-                if game_login(nav, platform, on_game_qr, on_game_status):
+                if game_login(nav, platform, on_game_qr, on_game_status, driver=driver):
                     game_login_ok = True
                     break
                 else:
@@ -586,7 +598,10 @@ class App(tk.Tk):
             account = self._account_var.get().strip()
             if not account:
                 account = f"unknown_{time.strftime('%H%M%S')}"
-            shot = Screenshotter(output_dir=os.path.join(writable_dir(), account))
+            shot = Screenshotter(
+                output_dir=os.path.join(writable_dir(), account),
+                driver=driver,
+            )
 
             screen_w, screen_h = pyautogui.size()
             # Intentional private attr access (avoids public API change to Navigator in this task)
@@ -672,7 +687,7 @@ class App(tk.Tk):
                     for tpl in game_templates:
                         if nav.wait_for_template(tpl, timeout=1, threshold=0.6):
                             self._send({"type": "log", "text": f"检测到登录界面，重新登录...", "level": "info"})
-                            if game_login(nav, platform, on_game_qr, on_game_status):
+                            if game_login(nav, platform, on_game_qr, on_game_status, driver=driver):
                                 monitor.resume()
                                 return True
                             else:
