@@ -52,6 +52,7 @@ class PopupMonitor:
                 # Selenium 截图：CSS 像素固定尺寸
                 from config import BROWSER_WIDTH, BROWSER_HEIGHT
                 css_w, css_h = BROWSER_WIDTH, BROWSER_HEIGHT
+                sw, sh = css_w, css_h
                 top_bounds = (0, 0, css_w, css_h // 2)
                 bottom_bounds = (0, css_h // 2, css_w, css_h // 2)
             else:
