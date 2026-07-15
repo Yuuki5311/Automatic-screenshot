@@ -226,6 +226,7 @@ def game_login(
     on_qr: Callable[[], None] | None = None,
     on_status: Callable[[str], None] | None = None,
     timeout: int = 300,
+    driver=None,
 ) -> bool:
     """在云游戏画面中完成游戏内账号登录。
 
@@ -326,11 +327,17 @@ def game_login(
         # ---- 检测二维码是否出现 ----
         if not qr_appeared:
             try:
-                screenshot = pyautogui.screenshot()
-                frame = np.array(screenshot)
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                del screenshot
-                del frame
+                if driver is not None:
+                    png_bytes = driver.get_screenshot_as_png()
+                    frame_bgr = cv2.imdecode(
+                        np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR
+                    )
+                else:
+                    screenshot = pyautogui.screenshot()
+                    frame = np.array(screenshot)
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    del screenshot
+                    del frame
                 data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
                 if bbox is not None and len(bbox) > 0:
                     qr_appeared = True
