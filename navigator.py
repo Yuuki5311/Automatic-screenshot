@@ -53,6 +53,27 @@ class Navigator:
             self._scale = None
 
     # ------------------------------------------------------------------
+    # 公开属性
+    # ------------------------------------------------------------------
+
+    @property
+    def effective_scale(self) -> float:
+        """返回有效缩放因子。Selenium 模式返回 1.0，PyAutoGUI 回退返回 _scale。"""
+        return 1.0 if self._scale is None else self._scale
+
+    @property
+    def screen_size(self) -> tuple[int, int]:
+        """返回截图像素尺寸 (width, height)。
+
+        Selenium 路径下返回 CSS 像素 (BROWSER_WIDTH, BROWSER_HEIGHT)，
+        PyAutoGUI 回退路径下返回逻辑分辨率 pyautogui.size()。
+        """
+        if self.driver is not None:
+            from config import BROWSER_WIDTH, BROWSER_HEIGHT
+            return (BROWSER_WIDTH, BROWSER_HEIGHT)
+        return pyautogui.size()
+
+    # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
 
