@@ -1,8 +1,8 @@
 """游戏内导航模块 —— 基于 OpenCV 模板匹配 + 原生鼠标点击。
 
-在 macOS 桌面客户端游戏画面中定位按钮并点击。
-使用 pyautogui 截取全屏并模拟鼠标操作，
-自动处理 Retina 显示的坐标缩放。
+在云游戏画面中通过图像识别定位按钮并点击。
+优先使用 Selenium 截图（CSS 像素），自动处理跨平台 DPI 差异。
+若 driver 不可用则回退到 pyautogui 全屏截图。
 """
 
 import os
@@ -23,25 +23,34 @@ class Navigator:
     def __init__(
         self,
         templates_dir: str = "templates",
+        driver=None,
         threshold: float = MATCH_THRESHOLD,
         max_retries: int = MAX_RETRIES,
+        window_offset: tuple = (0, 0),
     ):
         """
         Args:
             templates_dir: 存放按钮模板图的目录。
+            driver: Selenium WebDriver 实例（可选，为 None 时回退 PyAutoGUI 截图）。
             threshold: cv2.matchTemplate 匹配置信度阈值 (0~1)。
             max_retries: 单个按钮最大匹配重试次数。
+            window_offset: 浏览器窗口左上角屏幕坐标 (x, y)，用于 CSS→屏幕坐标转换。
         """
         self.templates_dir = resource_path(templates_dir)
+        self.driver = driver
         self.threshold = threshold
         self.max_retries = max_retries
+        self.window_offset_x = window_offset[0]
+        self.window_offset_y = window_offset[1]
 
         # 模板缓存：避免每次匹配都从磁盘加载
         self._template_cache: dict[str, np.ndarray] = {}
 
-        # Retina 缩放因子
-        # pyautogui.screenshot() 返回物理像素，pyautogui.click() 使用逻辑坐标
-        self._scale = self._detect_scale()
+        # Retina 缩放因子 — 仅 PyAutoGUI 回退路径需要
+        if self.driver is None:
+            self._scale = self._detect_scale()
+        else:
+            self._scale = None
 
     # ------------------------------------------------------------------
     # 内部方法
@@ -49,7 +58,7 @@ class Navigator:
 
     @staticmethod
     def _detect_scale() -> float:
-        """检测 Retina 显示缩放因子。
+        """检测 Retina 显示缩放因子（仅 PyAutoGUI 回退路径使用）。
 
         pyautogui.size() 返回逻辑分辨率 (points)，
         pyautogui.screenshot() 返回物理像素分辨率。
@@ -64,18 +73,21 @@ class Navigator:
         return scale
 
     def _get_screenshot(self) -> np.ndarray:
-        """截取当前全屏画面，返回 OpenCV 格式的 BGR numpy 数组。
+        """截取当前画面，返回 OpenCV 格式的 BGR numpy 数组。
 
-        返回的是物理像素分辨率的截图。
+        优先使用 Selenium 截图（CSS 像素 1920×1080），
+        若 driver 不可用则回退到 PyAutoGUI 物理像素截图。
         """
-        pil_image = pyautogui.screenshot()
-        # PIL Image (RGB) → numpy array → BGR for OpenCV
-        rgb = np.array(pil_image)
-        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        # 显式释放中间对象，降低内存峰值
-        del pil_image
-        del rgb
-        return bgr
+        if self.driver is not None:
+            png_bytes = self.driver.get_screenshot_as_png()
+            return cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
+        else:
+            pil_image = pyautogui.screenshot()
+            rgb = np.array(pil_image)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            del pil_image
+            del rgb
+            return bgr
 
     def _template_path(self, template_name: str) -> str:
         """构建模板文件的完整路径。"""
@@ -95,17 +107,15 @@ class Navigator:
             self._template_cache[path] = template
         return self._template_cache[path]
 
-    def _physical_to_logical(self, x: int, y: int) -> tuple:
-        """将物理像素坐标转换为逻辑坐标（用于鼠标点击）。"""
-        return (int(x / self._scale), int(y / self._scale))
+    def _click_at(self, css_x: int, css_y: int) -> None:
+        """CSS 像素坐标 → 屏幕绝对坐标 → 鼠标点击。
 
-    def _click_at(self, x: int, y: int) -> None:
-        """在屏幕上 (x, y) 物理像素位置模拟鼠标点击。
-
-        自动将物理像素坐标转换为逻辑坐标。
+        css_x, css_y 为模板匹配结果在 Selenium 截图（CSS 像素）
+        中的坐标。加上窗口偏移后得到屏幕绝对坐标。
         """
-        logical_x, logical_y = self._physical_to_logical(x, y)
-        pyautogui.click(logical_x, logical_y)
+        screen_x = int(css_x + self.window_offset_x)
+        screen_y = int(css_y + self.window_offset_y)
+        pyautogui.click(screen_x, screen_y)
 
     # ------------------------------------------------------------------
     # 公开方法
@@ -158,7 +168,6 @@ class Navigator:
             if max_val >= _threshold:
                 center_x = offset_x + max_loc[0] + t_w // 2
                 center_y = offset_y + max_loc[1] + t_h // 2
-                logical_x, logical_y = self._physical_to_logical(center_x, center_y)
                 self._click_at(center_x, center_y)
                 log.info(f"点击 {template_name} (置信度 {max_val:.2f})")
                 time.sleep(CLICK_INTERVAL)
