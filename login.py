@@ -259,8 +259,8 @@ def game_login(
         return False
 
     # ---- 计算搜索区域 ----
-    screen_w, screen_h = pyautogui.size()
-    scale = nav._scale
+    screen_w, screen_h = nav.screen_size
+    scale = nav.effective_scale
 
     # 平台按钮：微信在左半边，QQ 在右半边
     if platform.startswith("wx"):

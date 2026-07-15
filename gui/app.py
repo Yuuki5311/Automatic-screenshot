@@ -448,8 +448,8 @@ class App(tk.Tk):
                 else:
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    sw, sh = pyautogui.size()
-                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
+                    sw, sh = _nav.screen_size
+                    confirm_bounds = (0, int(sh * _nav.effective_scale * 0.5), int(sw * _nav.effective_scale), int(sh * _nav.effective_scale * 0.5))
                     _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
                     self._send({"type": "log", "text": "已确认退出登录"})
 
@@ -491,8 +491,8 @@ class App(tk.Tk):
                 else:
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    sw, sh = pyautogui.size()
-                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
+                    sw, sh = _nav.screen_size
+                    confirm_bounds = (0, int(sh * _nav.effective_scale * 0.5), int(sw * _nav.effective_scale), int(sh * _nav.effective_scale * 0.5))
                     _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
                     self._send({"type": "log", "text": "已确认退出登录"})
 
@@ -603,10 +603,9 @@ class App(tk.Tk):
                 driver=driver,
             )
 
-            screen_w, screen_h = pyautogui.size()
-            # Intentional private attr access (avoids public API change to Navigator in this task)
-            avatar_bounds = (0, 0, int(screen_w * nav._scale * 0.4), int(screen_h * nav._scale * 0.5))
-            nobility_bounds = (0, 0, int(screen_w * nav._scale), int(screen_h * nav._scale * 0.5))
+            screen_w, screen_h = nav.screen_size
+            avatar_bounds = (0, 0, int(screen_w * nav.effective_scale * 0.4), int(screen_h * nav.effective_scale * 0.5))
+            nobility_bounds = (0, 0, int(screen_w * nav.effective_scale), int(screen_h * nav.effective_scale * 0.5))
 
             # 加载绝对坐标（缺省值兜底，用户可通过 calibrate_coords.py 覆盖）
             _coords = {}
@@ -807,7 +806,7 @@ class App(tk.Tk):
 
             # ====== 退出游戏登录 ======
             self._send({"type": "log", "text": "正在退出游戏登录...", "level": "info"})
-            sw, sh = pyautogui.size()
+            sw, sh = nav.screen_size
             LOGOUT_MAX_RETRIES = 3
 
             for logout_attempt in range(1, LOGOUT_MAX_RETRIES + 1):
@@ -816,8 +815,8 @@ class App(tk.Tk):
 
                 # 1. 点击右上角设置按钮
                 settings_bounds = (
-                    int(sw * nav._scale * 0.8), 0,
-                    int(sw * nav._scale * 0.2), int(sh * nav._scale * 0.3),
+                    int(sw * nav.effective_scale * 0.8), 0,
+                    int(sw * nav.effective_scale * 0.2), int(sh * nav.effective_scale * 0.3),
                 )
                 if not nav.find_and_click("settings_icon.png", timeout=5, bounds=settings_bounds):
                     self._send({"type": "log", "text": f"未找到设置按钮，重试 ({logout_attempt}/{LOGOUT_MAX_RETRIES})...", "level": "warn"})
@@ -829,8 +828,8 @@ class App(tk.Tk):
 
                 # 2. 点击右下角「退出登录」
                 logout_bounds = (
-                    0, int(sh * nav._scale * 0.6),
-                    int(sw * nav._scale), int(sh * nav._scale * 0.4),
+                    0, int(sh * nav.effective_scale * 0.6),
+                    int(sw * nav.effective_scale), int(sh * nav.effective_scale * 0.4),
                 )
                 if not nav.find_and_click("settings_logout.png", timeout=5, bounds=logout_bounds):
                     # settings_logout 未匹配则点屏幕下方
@@ -844,8 +843,8 @@ class App(tk.Tk):
 
                 # 3. 确认退出
                 confirm_bounds = (
-                    0, int(sh * nav._scale * 0.5),
-                    int(sw * nav._scale), int(sh * nav._scale * 0.5),
+                    0, int(sh * nav.effective_scale * 0.5),
+                    int(sw * nav.effective_scale), int(sh * nav.effective_scale * 0.5),
                 )
                 nav.find_and_click("game_popup_confirm.png", timeout=3, bounds=confirm_bounds)
                 self._send({"type": "log", "text": "已确认退出登录"})
