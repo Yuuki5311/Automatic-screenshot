@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
-"""模板图辅助采集工具。
+"""模板图辅助采集工具（Selenium CSS 像素版）。
 
-逐条引导你在游戏界面中截取按钮模板图，自动保存为正确文件名，
-无需手动对照表格和命名。
+在浏览器游戏画面中截取按钮模板图，自动保存为正确文件名。
+截图源为 Selenium CSS 像素（1920×1080），跨平台分辨率一致。
 
 使用方法:
     python capture_templates.py
 
 流程:
-    1. 先手动打开王者荣耀，停在主界面
-    2. 运行此脚本
-    3. 每条提示会告诉你截取什么（如"左上角头像"）
-    4. 按回车后 macOS 截图工具出现，鼠标框选按钮区域
+    1. 脚本自动打开浏览器并导航到 gamer.qq.com
+    2. 手动登录并启动王者荣耀
+    3. 每条提示告诉你截取什么（如"左上角头像"）
+    4. 按回车后自动截取浏览器画面，用鼠标框选按钮区域
     5. 自动保存到 templates/ 目录
     6. 下一条，直到全部完成
 """
 
 import os
-import subprocess
 import sys
+import cv2
+import numpy as np
+
+from browser import create_browser
+from config import BROWSER_WIDTH, BROWSER_HEIGHT
 
 TEMPLATES_DIR = "templates"
 
@@ -77,14 +81,11 @@ TEMPLATES = [
 ]
 
 
-def clear_line():
-    """清除当前行。"""
-    sys.stdout.write("\033[2K\033[1G")
-    sys.stdout.flush()
-
-
-def capture_one(filename: str, description: str, location: str, index: int, total: int) -> bool:
+def capture_one(filename: str, description: str, location: str,
+                index: int, total: int, driver) -> bool:
     """引导用户截取一个模板图。
+
+    从 Selenium 截取整张浏览器画面，用 OpenCV ROI 选择器框选区域。
 
     Returns:
         True: 成功
@@ -102,30 +103,58 @@ def capture_one(filename: str, description: str, location: str, index: int, tota
     print(f"    位置: {location}")
     print(f"    将保存为: {filename}")
     print()
-    input("    按回车启动截图工具（鼠标框选按钮区域）...")
+    input("    按回车截取当前浏览器画面（请先确保游戏画面已就绪）...")
 
-    # 调用 macOS screencapture -i (交互式选区截图)
-    # -i: 交互模式（鼠标框选）
-    result = subprocess.run(
-        ["screencapture", "-i", filepath],
-        capture_output=True,
-    )
-
-    if result.returncode != 0:
-        print(f"    ⚠️  截图取消或失败（返回码: {result.returncode}）")
+    # Selenium 截图（CSS 像素 1920×1080）
+    try:
+        png_bytes = driver.get_screenshot_as_png()
+        full_img = cv2.imdecode(
+            np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR
+        )
+    except Exception as e:
+        print(f"    ⚠️  截图失败: {e}")
         choice = input("    [r]重试  [s]跳过  [q]退出: ").strip().lower()
         if choice == "r":
-            return capture_one(filename, description, location, index, total)
+            return capture_one(filename, description, location, index, total, driver)
         elif choice == "q":
             print("\n已退出。")
             sys.exit(0)
         else:
             return False
 
+    # OpenCV ROI 选择器 —— 鼠标框选后按 ENTER 确认，按 ESC 跳过
+    print("    🖱 用鼠标框选按钮区域 → 按 ENTER 确认 → 按 ESC 跳过")
+    print("    （若图像窗口未在前台，请切换过去操作）")
+
+    roi = cv2.selectROI(
+        f"[{index}/{total}] 框选: {description}",
+        full_img,
+        showCrosshair=True,
+        fromCenter=False,
+    )
+    cv2.destroyAllWindows()
+    cv2.waitKey(1)  # 确保窗口完全销毁
+
+    x, y, w, h = roi
+    if w == 0 or h == 0:
+        print(f"    ⚠️  未框选，跳过")
+        choice = input("    [r]重试  [s]跳过  [q]退出: ").strip().lower()
+        if choice == "r":
+            return capture_one(filename, description, location, index, total, driver)
+        elif choice == "q":
+            print("\n已退出。")
+            sys.exit(0)
+        else:
+            return False
+
+    # 裁剪并保存
+    cropped = full_img[y:y+h, x:x+w]
+    cv2.imwrite(filepath, cropped)
+
     # 验证文件
     if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
         size_kb = os.path.getsize(filepath) / 1024
-        print(f"    ✅ 已保存 ({size_kb:.1f} KB)")
+        print(f"    ✅ 已保存 ({size_kb:.1f} KB, {w}x{h}px)")
         return True
     else:
         print(f"    ⚠️  文件为空或未生成")
@@ -134,37 +163,52 @@ def capture_one(filename: str, description: str, location: str, index: int, tota
 
 def main():
     print("=" * 50)
-    print("  王者荣耀 — 模板图采集工具")
+    print("  王者荣耀 — 模板图采集工具 (Selenium CSS 像素)")
     print("=" * 50)
     print()
     print("使用前请确保：")
-    print("  1. 已手动打开王者荣耀并停在主界面")
-    print("  2. 需要进入子页面时（如商城、定制），先在游戏中点进去")
-    print("  3. 截图时用鼠标框选按钮图标区域（留少许边距）")
+    print("  1. 浏览器会自动打开（1920×1080 CSS 像素）")
+    print("  2. 手动登录腾讯先锋并启动王者荣耀")
+    print("  3. 需要截取子页面时，先在游戏中点进去")
+    print("  4. 截图时用鼠标框选按钮图标区域（留少许边距）")
+    print(f"  5. 截图分辨率固定为 {BROWSER_WIDTH}x{BROWSER_HEIGHT} CSS 像素")
     print()
     print(f"共 {len(TEMPLATES)} 个模板图需要采集")
     print()
-    input("按回车开始...")
+    input("按回车启动浏览器...")
+
+    # 启动浏览器
+    print("\n正在启动浏览器...")
+    driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
+
+    print()
+    print("浏览器已启动。请手动完成以下操作：")
+    print("  1. 在浏览器中登录腾讯先锋")
+    print("  2. 搜索并启动王者荣耀")
+    print("  3. 进入游戏主界面")
+    print()
+    input("准备就绪后按回车开始采集模板...")
 
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
     success = 0
-    skipped = 0
 
     for i, (filename, desc, location) in enumerate(TEMPLATES, 1):
-        ok = capture_one(filename, desc, location, i, len(TEMPLATES))
+        ok = capture_one(filename, desc, location, i, len(TEMPLATES), driver)
         if ok:
-            if os.path.exists(os.path.join(TEMPLATES_DIR, filename)):
-                success += 1
+            success += 1
 
     print(f"\n{'=' * 50}")
-    existing = sum(1 for f, _, _ in TEMPLATES if os.path.exists(os.path.join(TEMPLATES_DIR, f)))
+    existing = sum(
+        1 for f, _, _ in TEMPLATES
+        if os.path.exists(os.path.join(TEMPLATES_DIR, f))
+    )
     missing = len(TEMPLATES) - existing
     print(f"完成: {existing}/{len(TEMPLATES)} 个模板图已就绪")
     if missing > 0:
         print(f"还缺 {missing} 个，可以重新运行此脚本补充")
     else:
-        print("全部模板图已就绪，可以运行 python main.py 了！")
+        print("全部模板图已就绪！")
 
 
 if __name__ == "__main__":
@@ -172,3 +216,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n\n已取消。")
+    finally:
+        cv2.destroyAllWindows()
