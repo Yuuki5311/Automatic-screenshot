@@ -421,11 +421,11 @@ class App(tk.Tk):
                 _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
                 monitor = PopupMonitor(navigator=_nav)
 
-                # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 执行退出
+                # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 冷却等待
                 monitor.close_all_popups()
-                self._send({"type": "log", "text": "正在退出当前游戏登录..."})
                 time.sleep(3)
                 monitor.close_all_popups()
+                monitor.wait_until_clear(3)
 
                 # 检测退出按钮 (2次尝试, 每次间隔30s)
                 LOGOUT_BTN_RETRIES = 2
@@ -461,10 +461,11 @@ class App(tk.Tk):
                 _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
                 monitor = PopupMonitor(navigator=_nav)
 
-                # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 执行退出
+                # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 冷却等待
                 monitor.close_all_popups()
                 time.sleep(3)
                 monitor.close_all_popups()
+                monitor.wait_until_clear(3)
 
                 # 检测退出按钮 (2次尝试, 每次间隔30s)
                 LOGOUT_BTN_RETRIES = 2
@@ -575,7 +576,8 @@ class App(tk.Tk):
             self._send({"type": "log", "text": "弹窗清理完毕，等待 3 秒..."})
             time.sleep(3)
             monitor.close_all_popups()
-            self._send({"type": "log", "text": "二次确认无弹窗..."})
+            monitor.wait_until_clear(3)
+            self._send({"type": "log", "text": "冷却完成，确认无弹窗..."})
             # 启动异步弹窗监控，截图全程后台扫描
             monitor.start()
             _log.info("阶段 4 异步弹窗监控已启动")
