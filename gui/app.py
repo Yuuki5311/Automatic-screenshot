@@ -705,6 +705,7 @@ class App(tk.Tk):
 
                     all_ok = True
                     last_step = None  # (verify_template, rollback_action)
+                    rollback_count = 0  # 防止同一节点反复回退
 
                     for item in clicks:
                         anchor = None
@@ -737,18 +738,20 @@ class App(tk.Tk):
                             all_ok = False
                             self._send({"type": "log", "text": f"  ⚠ 找不到 {template}", "level": "warn"})
 
-                            # 连续失败 ≥2 且主界面头像消失
+                            # 有上一步锚点 → 立即检查是否页面还在，在则回退重试
+                            if last_step is not None and rollback_count == 0:
+                                verify_template, rollback = last_step
+                                if nav.wait_for_template(verify_template, timeout=2):
+                                    self._send({"type": "log", "text": f"  ↩ 回退：{verify_template} 可见，重试上一步", "level": "warn"})
+                                    rollback()
+                                    time.sleep(CLICK_INTERVAL)
+                                    consecutive_failures = 0
+                                    rollback_count += 1
+                                    all_ok = True
+                                    continue
+
+                            # 连续失败 ≥2 且主界面头像消失 → 游戏可能崩溃
                             if consecutive_failures >= 2 and not nav.wait_for_template("avatar.png", timeout=2):
-                                if last_step is not None:
-                                    verify_template, rollback = last_step
-                                    if nav.wait_for_template(verify_template, timeout=3):
-                                        self._send({"type": "log", "text": f"  ↩ 回退：检测到 {verify_template}，重试上一步", "level": "warn"})
-                                        rollback()
-                                        time.sleep(CLICK_INTERVAL)
-                                        consecutive_failures = 0
-                                        all_ok = True
-                                        continue
-                                # 无 last_step 或上一步模板也不可见 → 游戏恢复
                                 self._send({"type": "log", "text": "⚠️ 游戏可能已重启，尝试恢复...", "level": "warn"})
                                 if _do_recover():
                                     self._send({"type": "log", "text": "✅ 游戏已恢复，重新开始截图", "level": "success"})
