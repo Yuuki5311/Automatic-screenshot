@@ -165,6 +165,10 @@ class PopupMonitor:
             else:
                 time.sleep(1)
 
+        # 冷静期结束后再做最后一次扫描，防止弹窗在最后毫秒出现
+        if self._do_scan():
+            closed += 1
+
         if closed > 0:
             log.info(f"冷却等待完成，共关闭 {closed} 个弹窗")
         return closed
