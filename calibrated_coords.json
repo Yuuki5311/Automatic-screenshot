@@ -1,10 +1,114 @@
 {
-  "minion": [
-    1377,
-    366
-  ],
   "avatar": [
-    379,
-    249
+    669,
+    239
+  ],
+  "nobility_icon": [
+    1975,
+    241
+  ],
+  "shop_icon": [
+    2487,
+    406
+  ],
+  "customize_icon": [
+    1152,
+    1224
+  ],
+  "back_arrow": [
+    682,
+    236
+  ],
+  "settings_icon": [
+    2386,
+    241
+  ],
+  "tab_home": [
+    695,
+    383
+  ],
+  "tab_hero": [
+    689,
+    625
+  ],
+  "tab_illustrated": [
+    706,
+    748
+  ],
+  "universal_illustrated": [
+    685,
+    853
+  ],
+  "lingbao": [
+    1129,
+    470
+  ],
+  "skin_illustrated": [
+    695,
+    962
+  ],
+  "lottery_tab": [
+    2279,
+    1235
+  ],
+  "points_lottery": [
+    689,
+    507
+  ],
+  "skin_customize": [
+    702,
+    378
+  ],
+  "minion": [
+    2382,
+    457
+  ],
+  "personal_customize": [
+    717,
+    493
+  ],
+  "poke": [
+    693,
+    606
+  ],
+  "game_wx_ios": [
+    942,
+    1066
+  ],
+  "game_wx_android": [
+    1356,
+    1067
+  ],
+  "game_qq_ios": [
+    1781,
+    1068
+  ],
+  "game_qq_android": [
+    2179,
+    1060
+  ],
+  "game_login_other": [
+    1564,
+    892
+  ],
+  "enter_game": [
+    1576,
+    1051
+  ],
+  "game_logout_btn": [
+    2444,
+    230
+  ],
+  "game_logout_confirm": [
+    1765,
+    1025
+  ],
+  "game_popup_confirm": [
+    1765,
+    1025
+  ],
+  "settings_logout": [
+    2193,
+    1136
   ]
 }
