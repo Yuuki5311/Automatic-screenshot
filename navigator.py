@@ -43,6 +43,9 @@ class Navigator:
         # pyautogui.screenshot() 返回物理像素，pyautogui.click() 使用逻辑坐标
         self._scale = self._detect_scale()
 
+        # 兜底坐标：模板匹配失败后直接坐标点击（首次使用时懒加载）
+        self._coords: dict | None = None
+
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
@@ -107,6 +110,25 @@ class Navigator:
         logical_x, logical_y = self._physical_to_logical(x, y)
         pyautogui.click(logical_x, logical_y)
 
+    def _load_coords(self) -> dict:
+        """懒加载 calibrated_coords.json，仅在首次兜底点击时触发。
+
+        返回 dict 映射模板名(无后缀) → [x, y] 逻辑坐标。
+        文件不存在或损坏则返回空 dict，后续不再重试。
+        """
+        if self._coords is not None:
+            return self._coords
+        try:
+            import json
+            path = resource_path("calibrated_coords.json")
+            with open(path, "r") as f:
+                self._coords = json.load(f)
+            log.info(f"已加载 {len(self._coords)} 个兜底坐标")
+        except Exception:
+            log.warning("兜底坐标加载失败，将跳过坐标点击兜底")
+            self._coords = {}
+        return self._coords
+
     # ------------------------------------------------------------------
     # 公开方法
     # ------------------------------------------------------------------
@@ -165,6 +187,16 @@ class Navigator:
                 return True
 
             time.sleep(RETRY_INTERVAL)
+
+        # 兜底：坐标点击
+        coords = self._load_coords()
+        key = template_name.replace(".png", "")
+        if key in coords:
+            x, y = coords[key]
+            pyautogui.click(x, y)
+            log.info(f"兜底点击 {template_name} @ ({x}, {y})")
+            time.sleep(CLICK_INTERVAL)
+            return True
 
         log.warning(f"未能找到: {template_name}")
         return False
