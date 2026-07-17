@@ -2,21 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让后台弹窗监控只安全关闭明确的 X 按钮，不再误点确认按钮或校准坐标而跳回腾讯先锋页面。
+**Goal:** 让通用弹窗清理只安全关闭明确的 X 按钮，不再误点确认按钮或校准坐标而跳回腾讯先锋页面。
 
-**Architecture:** 在 `Navigator` 中为模板等待增加区域限制，并为点击增加可关闭的坐标兜底开关；默认行为保持兼容。`PopupMonitor` 使用严格白名单、统一上半屏区域和禁用兜底参数，登录及退出流程继续显式处理确认按钮。
+**Architecture:** 在 `Navigator` 中为模板等待增加区域限制，并为点击增加可关闭的坐标兜底开关；默认行为保持兼容。`PopupMonitor._do_scan` 被后台 `_loop` 以及同步 `close_all_popups`、`wait_until_clear` 共同复用，这三条路径有意使用严格 X 白名单、统一上半屏区域和禁用兜底参数；登录及退出流程继续在明确步骤中显式处理确认按钮。
 
 **Tech Stack:** Python 3、OpenCV、PyAutoGUI、`unittest.mock`、现有 `test_core.py` 测试运行器
 
 ## Global Constraints
 
-- 后台监控仅自动点击 `popup_close.png` 和 `popup_close_small.png`。
+- 后台循环和同步 `close_all_popups`、`wait_until_clear` 仅自动点击 `popup_close.png` 和 `popup_close_small.png`。
 - 两个关闭按钮的匹配阈值固定为 `0.85`。
-- 后台检测和点击必须使用同一上半屏 `bounds`。
-- 后台监控不得使用 `calibrated_coords.json` 坐标兜底。
-- 后台监控不得点击屏幕空白区域作为关闭失败兜底。
+- 三条通用清理路径的检测和点击必须使用同一上半屏 `bounds`。
+- 三条通用清理路径不得使用 `calibrated_coords.json` 坐标兜底。
+- 三条通用清理路径不得点击屏幕空白区域作为关闭失败兜底。
 - `find_and_click` 的现有调用默认继续允许坐标兜底。
-- 登录、退出和其他确认按钮继续由主流程显式操作。
+- 登录、退出和其他确认按钮只能由主流程显式操作；同步通用清理也不得代为确认。
 
 ---
 
@@ -382,5 +382,7 @@ Expected: `git diff --check` 无输出；状态仅包含用户已有的未跟踪
 2. 日志中不出现 `game_logout_confirm.png` 或 `game_popup_confirm.png` 的后台扫描记录。
 3. 制造一个包含已配置 X 按钮的普通弹窗，确认它仍被自动关闭。
 4. 完成截图流程后的显式退出确认仍可正常点击。
+5. 阶段 2 执行 `close_all_popups` / `wait_until_clear` 同步清理时不会误点确认按钮；遇到需要确认的弹窗时，后续主流程显式步骤仍能处理，流程不被阻塞。
+6. 阶段 3 执行 `close_all_popups` / `wait_until_clear` 同步清理时不会误点确认按钮；登录或退出等确认仍由主流程显式步骤完成，流程不被阻塞。
 
-Expected: 四项全部满足；若无法访问真实云游戏环境，则明确将本步骤标记为待用户执行，不以自动测试替代该结论。
+Expected: 六项全部满足；若无法访问真实云游戏环境，则明确将本步骤标记为待用户执行，不以自动测试替代该结论。

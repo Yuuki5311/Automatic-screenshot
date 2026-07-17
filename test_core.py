@@ -178,7 +178,28 @@ class TestPlatformBounds:
 # ========== PopupMonitor 安全白名单测试 ==========
 
 class TestPopupSafety:
-    """验证后台监控只操作安全的关闭按钮。"""
+    """验证同步与异步通用扫描只操作安全的关闭按钮。"""
+
+    @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
+    def test_scan_checks_exact_close_allowlist_with_shared_bounds(
+        self, _mock_size
+    ):
+        from popup_monitor import PopupMonitor
+
+        nav = Mock()
+        nav._scale = 2.0
+        nav.wait_for_template.side_effect = [False, False]
+        monitor = PopupMonitor(navigator=nav)
+
+        assert monitor._do_scan() is False
+
+        top_bounds = (0, 0, 2940, 956)
+        assert [
+            call.args[0] for call in nav.wait_for_template.call_args_list
+        ] == ["popup_close.png", "popup_close_small.png"]
+        for call in nav.wait_for_template.call_args_list:
+            assert call.kwargs["threshold"] == 0.85
+            assert call.kwargs["bounds"] == top_bounds
 
     @patch("popup_monitor.time.sleep", return_value=None)
     @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
