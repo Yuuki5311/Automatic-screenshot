@@ -1,15 +1,15 @@
-"""游戏内导航模块 —— 基于 OpenCV 模板匹配 + 原生鼠标点击。
+"""游戏内导航模块 —— 基于 OpenCV 模板匹配 + Selenium 浏览器点击。
 
-在 macOS 桌面客户端游戏画面中定位按钮并点击。
-使用 pyautogui 截取全屏并模拟鼠标操作，
-自动处理 Retina 显示的坐标缩放。
+在浏览器游戏画面中定位按钮并点击。
+使用 Selenium 截取浏览器视口并模拟 CSS 坐标点击。
 """
 
 import os
 import time
 import cv2
 import numpy as np
-import pyautogui
+
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
 
 from config import MATCH_THRESHOLD, MAX_RETRIES, RETRY_INTERVAL, CLICK_INTERVAL, resource_path
 from logger import get_logger
@@ -18,20 +18,23 @@ log = get_logger()
 
 
 class Navigator:
-    """在桌面客户端游戏画面中通过图像识别找到按钮并点击。"""
+    """在浏览器游戏画面中通过图像识别找到按钮并点击。"""
 
     def __init__(
         self,
+        driver,
         templates_dir: str = "templates",
         threshold: float = MATCH_THRESHOLD,
         max_retries: int = MAX_RETRIES,
     ):
         """
         Args:
+            driver: Selenium WebDriver 实例。
             templates_dir: 存放按钮模板图的目录。
             threshold: cv2.matchTemplate 匹配置信度阈值 (0~1)。
             max_retries: 单个按钮最大匹配重试次数。
         """
+        self.driver = driver
         self.templates_dir = resource_path(templates_dir)
         self.threshold = threshold
         self.max_retries = max_retries
@@ -39,9 +42,8 @@ class Navigator:
         # 模板缓存：避免每次匹配都从磁盘加载
         self._template_cache: dict[str, np.ndarray] = {}
 
-        # Retina 缩放因子
-        # pyautogui.screenshot() 返回物理像素，pyautogui.click() 使用逻辑坐标
-        self._scale = self._detect_scale()
+        # CSS 像素坐标系，不做 Retina 物理/逻辑换算
+        self._scale = 1.0
 
         # 兜底坐标：模板匹配失败后直接坐标点击（首次使用时懒加载）
         self._coords: dict | None = None
@@ -50,34 +52,11 @@ class Navigator:
     # 内部方法
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _detect_scale() -> float:
-        """检测 Retina 显示缩放因子。
-
-        pyautogui.size() 返回逻辑分辨率 (points)，
-        pyautogui.screenshot() 返回物理像素分辨率。
-        两者之比即为缩放因子（Retina 通常为 2.0）。
-        """
-        logical_w, _ = pyautogui.size()
-        screenshot = pyautogui.screenshot()
-        physical_w, _ = screenshot.size
-        scale = physical_w / logical_w
-        log.info(f"屏幕: 逻辑 {logical_w}x{pyautogui.size().height}, "
-                 f"物理 {physical_w}x{screenshot.height}, 缩放 {scale:.1f}")
-        return scale
-
     def _get_screenshot(self) -> np.ndarray:
-        """截取当前全屏画面，返回 OpenCV 格式的 BGR numpy 数组。
-
-        返回的是物理像素分辨率的截图。
-        """
-        pil_image = pyautogui.screenshot()
-        # PIL Image (RGB) → numpy array → BGR for OpenCV
-        rgb = np.array(pil_image)
-        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        # 显式释放中间对象，降低内存峰值
-        del pil_image
-        del rgb
+        """截取当前浏览器视口，返回 OpenCV 格式的 BGR numpy 数组。"""
+        png = self.driver.get_screenshot_as_png()
+        arr = np.frombuffer(png, dtype=np.uint8)
+        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         return bgr
 
     def _template_path(self, template_name: str) -> str:
@@ -99,21 +78,24 @@ class Navigator:
         return self._template_cache[path]
 
     def _physical_to_logical(self, x: int, y: int) -> tuple:
-        """将物理像素坐标转换为逻辑坐标（用于鼠标点击）。"""
+        """将物理像素坐标转换为逻辑坐标（_scale=1.0 时为恒等映射）。"""
         return (int(x / self._scale), int(y / self._scale))
 
-    def _click_at(self, x: int, y: int) -> None:
-        """在屏幕上 (x, y) 物理像素位置模拟鼠标点击。
+    def click_css(self, x: int, y: int) -> None:
+        """在浏览器视口 CSS 坐标 (x, y) 处点击。"""
+        actions = ActionBuilder(self.driver)
+        actions.pointer_action.move_to_location(int(x), int(y))
+        actions.pointer_action.click()
+        actions.perform()
 
-        自动将物理像素坐标转换为逻辑坐标。
-        """
-        logical_x, logical_y = self._physical_to_logical(x, y)
-        pyautogui.click(logical_x, logical_y)
+    def _click_at(self, x: int, y: int) -> None:
+        """在浏览器视口 CSS 坐标 (x, y) 处点击。"""
+        self.click_css(x, y)
 
     def _load_coords(self) -> dict:
         """懒加载 calibrated_coords.json，仅在首次兜底点击时触发。
 
-        返回 dict 映射模板名(无后缀) → [x, y] 逻辑坐标。
+        返回 dict 映射模板名(无后缀) → [x, y] CSS 坐标。
         文件不存在或损坏则返回空 dict，后续不再重试。
         """
         if self._coords is not None:
@@ -138,12 +120,12 @@ class Navigator:
         bounds: tuple = None, max_retries: int = None,
         threshold: float = None, allow_fallback: bool = True,
     ) -> bool:
-        """在全屏幕画面中匹配模板图并点击其中心位置。
+        """在浏览器画面中匹配模板图并点击其中心位置。
 
         Args:
             template_name: 模板文件名。
             timeout: 保留参数。
-            bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素）。
+            bounds: 可选 (x, y, w, h) 限制搜索区域（CSS 像素）。
             max_retries: 最大重试次数，默认使用 self.max_retries。
             threshold: 匹配置信度阈值，默认使用 self.threshold。
             allow_fallback: 模板匹配失败时是否使用坐标兜底点击。
@@ -181,7 +163,6 @@ class Navigator:
             if max_val >= _threshold:
                 center_x = offset_x + max_loc[0] + t_w // 2
                 center_y = offset_y + max_loc[1] + t_h // 2
-                logical_x, logical_y = self._physical_to_logical(center_x, center_y)
                 self._click_at(center_x, center_y)
                 log.info(f"点击 {template_name} (置信度 {max_val:.2f})")
                 time.sleep(CLICK_INTERVAL)
@@ -194,7 +175,7 @@ class Navigator:
             key = template_name.replace(".png", "")
             if key in coords:
                 x, y = coords[key]
-                pyautogui.click(x, y)
+                self._click_at(x, y)
                 log.info(f"兜底点击 {template_name} @ ({x}, {y})")
                 time.sleep(CLICK_INTERVAL)
                 return True
@@ -210,7 +191,7 @@ class Navigator:
             template_name: 模板文件名。
             timeout: 最大等待时间（秒）。
             threshold: 匹配置信度阈值，默认使用 self.threshold。
-            bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素）。
+            bounds: 可选 (x, y, w, h) 限制搜索区域（CSS 像素）。
 
         Returns:
             bool: 在超时前检测到模板返回 True，否则 False。

@@ -94,6 +94,37 @@ class TestEdgeBrowserStartup:
             assert "service" not in kwargs
 
 
+# ========== Navigator Selenium 截图与点击测试 ==========
+
+class TestNavigatorSelenium:
+    def test_scale_is_one_without_pyautogui_screenshot(self):
+        from navigator import Navigator
+
+        driver = Mock()
+        with patch("pyautogui.screenshot") as mock_shot:
+            nav = Navigator(driver=driver, templates_dir=TEMPLATES_DIR)
+            assert nav._scale == 1.0
+            mock_shot.assert_not_called()
+
+    @patch("navigator.ActionBuilder")
+    def test_click_css_uses_action_builder(self, mock_ab):
+        from navigator import Navigator
+
+        driver = Mock()
+        builder = mock_ab.return_value
+        builder.pointer_action.move_to_location.return_value = builder.pointer_action
+        builder.pointer_action.click.return_value = builder.pointer_action
+        builder.perform.return_value = None
+        nav = Navigator.__new__(Navigator)
+        nav.driver = driver
+        nav._scale = 1.0
+        nav.click_css(100, 200)
+        mock_ab.assert_called_once_with(driver)
+        builder.pointer_action.move_to_location.assert_called_once_with(100, 200)
+        builder.pointer_action.click.assert_called_once()
+        builder.perform.assert_called_once()
+
+
 # ========== Navigator 模板缓存测试 ==========
 
 class TestTemplateCache:
@@ -103,7 +134,7 @@ class TestTemplateCache:
         """模板加载后应存入缓存，第二次从缓存命中。"""
         from navigator import Navigator
 
-        nav = Navigator(templates_dir=TEMPLATES_DIR)
+        nav = Navigator(driver=Mock(), templates_dir=TEMPLATES_DIR)
         template = nav._load_template("avatar.png")
 
         assert template is not None, "模板文件应能加载"
@@ -119,7 +150,7 @@ class TestTemplateCache:
         """加载不存在的模板应返回 None。"""
         from navigator import Navigator
 
-        nav = Navigator(templates_dir=TEMPLATES_DIR)
+        nav = Navigator(driver=Mock(), templates_dir=TEMPLATES_DIR)
         result = nav._load_template("nonexistent.png")
         assert result is None, "不存在的模板应返回 None"
 
@@ -127,7 +158,7 @@ class TestTemplateCache:
         """cleanup 应清空模板缓存。"""
         from navigator import Navigator
 
-        nav = Navigator(templates_dir=TEMPLATES_DIR)
+        nav = Navigator(driver=Mock(), templates_dir=TEMPLATES_DIR)
         nav._load_template("avatar.png")
         assert len(nav._template_cache) > 0, "缓存应有内容"
 
@@ -138,7 +169,7 @@ class TestTemplateCache:
         """多个模板应全部存入缓存。"""
         from navigator import Navigator
 
-        nav = Navigator(templates_dir=TEMPLATES_DIR)
+        nav = Navigator(driver=Mock(), templates_dir=TEMPLATES_DIR)
         templates = ["avatar.png", "tab_home.png", "tab_hero.png"]
 
         for t in templates:
@@ -365,9 +396,9 @@ class TestNavigatorSafetyOptions:
     """测试后台监控需要的安全匹配选项。"""
 
     @patch("navigator.time.sleep", return_value=None)
-    @patch("navigator.pyautogui.click")
+    @patch("navigator.Navigator.click_css")
     def test_find_and_click_can_disable_coordinate_fallback(
-        self, mock_click, _mock_sleep
+        self, mock_click_css, _mock_sleep
     ):
         from navigator import Navigator
 
@@ -388,7 +419,7 @@ class TestNavigatorSafetyOptions:
 
         assert result is False
         nav._load_coords.assert_not_called()
-        mock_click.assert_not_called()
+        mock_click_css.assert_not_called()
 
     @patch("navigator.time.sleep", return_value=None)
     @patch("navigator.cv2.matchTemplate")
@@ -411,6 +442,28 @@ class TestNavigatorSafetyOptions:
 
         search_area = mock_match.call_args.args[0]
         assert search_area.shape == (8, 10, 3)
+
+
+# ========== Screenshotter 浏览器截图测试 ==========
+
+class TestScreenshotterDriver:
+    def test_take_saves_browser_screenshot(self):
+        from screenshotter import Screenshotter
+
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        _, png_bytes = cv2.imencode(".png", img)
+        png_data = png_bytes.tobytes()
+
+        driver = Mock()
+        driver.get_screenshot_as_png.return_value = png_data
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shot = Screenshotter(tmpdir, driver=driver)
+            path = shot.take("test_shot")
+
+            assert os.path.isfile(path)
+            assert os.path.getsize(path) > 0
+            driver.get_screenshot_as_png.assert_called_once()
 
 
 # ========== 截图任务配置测试 ==========
