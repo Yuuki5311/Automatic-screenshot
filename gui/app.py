@@ -401,9 +401,9 @@ class App(tk.Tk):
                     self._send({"type": "done", "text": "❌ 启动游戏失败"})
                     return
 
-                _log.info("[阶段2] 游戏启动完成")
+                _log.info(f"[阶段2] 游戏启动完成，当前 URL: {driver.current_url}")
 
-                self._send({"type": "log", "text": "✅ 已点击秒玩，等待游戏启动...", "level": "success"})
+                self._send({"type": "log", "text": "✅ 已切换到云游戏标签页", "level": "success"})
 
                 # ---- 清除游戏启动后的弹窗（仅首次） ----
                 self._send({"type": "log", "text": "等待 10 秒后清除初始弹窗..."})
@@ -423,10 +423,11 @@ class App(tk.Tk):
                 monitor.close_all_popups()
                 monitor.wait_until_clear(3)
 
-                # 检测退出按钮 (2次尝试, 每次间隔30s)
+                # 有退出按钮 → 退出并确认；无退出按钮 → 处理云服务器确认弹窗
                 LOGOUT_BTN_RETRIES = 2
                 LOGOUT_BTN_WAIT = 30
                 logout_btn_found = False
+                confirm_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
                 for logout_try in range(1, LOGOUT_BTN_RETRIES + 1):
                     if _nav.find_and_click("game_logout_btn.png", timeout=5, max_retries=3):
                         logout_btn_found = True
@@ -435,14 +436,19 @@ class App(tk.Tk):
                         self._send({"type": "log", "text": f"未检测到退出按钮，{LOGOUT_BTN_WAIT}s后重试 ({logout_try}/{LOGOUT_BTN_RETRIES})...", "level": "warn"})
                         time.sleep(LOGOUT_BTN_WAIT)
 
-                if not logout_btn_found:
-                    self._send({"type": "log", "text": "未检测到退出按钮，跳过退出登录阶段", "level": "warn"})
-                else:
+                if logout_btn_found:
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    confirm_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
-                    _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
-                    self._send({"type": "log", "text": "已确认退出登录"})
+                    if _nav.find_and_click("game_popup_confirm.png", timeout=3, bounds=confirm_bounds):
+                        self._send({"type": "log", "text": "已确认退出登录"})
+                    else:
+                        self._send({"type": "log", "text": "未找到退出确认按钮", "level": "warn"})
+                else:
+                    self._send({"type": "log", "text": "未检测到退出按钮，检查云服务器确认弹窗...", "level": "warn"})
+                    if _nav.find_and_click("game_popup_confirm.png", timeout=3, bounds=confirm_bounds):
+                        self._send({"type": "log", "text": "已点击云服务器确认弹窗"})
+                    else:
+                        self._send({"type": "log", "text": "未发现确认弹窗，继续游戏登录", "level": "info"})
 
                 monitor = None
 
@@ -462,10 +468,11 @@ class App(tk.Tk):
                 monitor.close_all_popups()
                 monitor.wait_until_clear(3)
 
-                # 检测退出按钮 (2次尝试, 每次间隔30s)
+                # 有退出按钮 → 退出并确认；无退出按钮 → 处理云服务器确认弹窗
                 LOGOUT_BTN_RETRIES = 2
                 LOGOUT_BTN_WAIT = 30
                 logout_btn_found = False
+                confirm_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
                 for logout_try in range(1, LOGOUT_BTN_RETRIES + 1):
                     if _nav.find_and_click("game_logout_btn.png", timeout=5, max_retries=3):
                         logout_btn_found = True
@@ -474,14 +481,19 @@ class App(tk.Tk):
                         self._send({"type": "log", "text": f"未检测到退出按钮，{LOGOUT_BTN_WAIT}s后重试 ({logout_try}/{LOGOUT_BTN_RETRIES})...", "level": "warn"})
                         time.sleep(LOGOUT_BTN_WAIT)
 
-                if not logout_btn_found:
-                    self._send({"type": "log", "text": "未检测到退出按钮，跳过退出登录阶段", "level": "warn"})
-                else:
+                if logout_btn_found:
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    confirm_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
-                    _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
-                    self._send({"type": "log", "text": "已确认退出登录"})
+                    if _nav.find_and_click("game_popup_confirm.png", timeout=3, bounds=confirm_bounds):
+                        self._send({"type": "log", "text": "已确认退出登录"})
+                    else:
+                        self._send({"type": "log", "text": "未找到退出确认按钮", "level": "warn"})
+                else:
+                    self._send({"type": "log", "text": "未检测到退出按钮，检查云服务器确认弹窗...", "level": "warn"})
+                    if _nav.find_and_click("game_popup_confirm.png", timeout=3, bounds=confirm_bounds):
+                        self._send({"type": "log", "text": "已点击云服务器确认弹窗"})
+                    else:
+                        self._send({"type": "log", "text": "未发现确认弹窗，继续游戏登录", "level": "info"})
 
                 monitor = None
 
@@ -590,7 +602,7 @@ class App(tk.Tk):
             avatar_bounds = (0, 0, int(BROWSER_WIDTH * 0.4), int(BROWSER_HEIGHT * 0.5))
             nobility_bounds = (0, 0, BROWSER_WIDTH, int(BROWSER_HEIGHT * 0.5))
 
-            # 加载绝对坐标（缺省值兜底，用户可通过 calibrate_coords.py 覆盖）
+            # 仅主页头像 / 小兵使用显式坐标点击（其余按钮不做 calibrated_coords 兜底）
             _coords = {}
             try:
                 with open(resource_path("calibrated_coords.json"), "r") as f:
@@ -599,6 +611,7 @@ class App(tk.Tk):
                 pass
             _avatar_xy = tuple(_coords.get("avatar", [379, 249]))
             _minion_xy = tuple(_coords.get("minion", [1377, 366]))
+            _log.info(f"坐标点击仅保留: avatar={_avatar_xy}, minion={_minion_xy}")
 
             # 截图任务（和 main.py 一致）
             # __coords__ 格式: ("__coords__", 描述, (x, y), 锚点模板)

@@ -393,6 +393,28 @@ class TestNavigatorSafetyOptions:
         mock_click_css.assert_not_called()
 
     @patch("navigator.time.sleep", return_value=None)
+    @patch("navigator.Navigator.click_css")
+    def test_find_and_click_default_disables_fallback(
+        self, mock_click_css, _mock_sleep
+    ):
+        """默认不允许坐标兜底，匹配失败应直接返回 False。"""
+        from navigator import Navigator
+
+        nav = Navigator.__new__(Navigator)
+        nav.threshold = 0.53
+        nav.max_retries = 1
+        nav._scale = 1.0
+        nav._load_template = Mock(return_value=np.ones((2, 2, 3), dtype=np.uint8))
+        nav._get_screenshot = Mock(return_value=np.zeros((8, 8, 3), dtype=np.uint8))
+        nav._load_coords = Mock(return_value={"game_logout_btn": [10, 20]})
+
+        result = nav.find_and_click("game_logout_btn.png", max_retries=1, threshold=1.1)
+
+        assert result is False
+        nav._load_coords.assert_not_called()
+        mock_click_css.assert_not_called()
+
+    @patch("navigator.time.sleep", return_value=None)
     @patch("navigator.cv2.matchTemplate")
     def test_wait_for_template_limits_matching_to_bounds(
         self, mock_match, _mock_sleep
@@ -435,6 +457,56 @@ class TestScreenshotterDriver:
             assert os.path.isfile(path)
             assert os.path.getsize(path) > 0
             driver.get_screenshot_as_png.assert_called_once()
+
+
+# ========== 云游戏新标签页切换测试 ==========
+
+class TestSwitchToNewTab:
+    """秒玩后切换到云游戏标签页。"""
+
+    @patch("game_launcher.time.sleep", return_value=None)
+    def test_switches_to_newest_non_original_handle(self, _mock_sleep):
+        from game_launcher import switch_to_new_tab
+
+        driver = Mock()
+        driver.window_handles = ["home", "game"]
+        driver.current_url = "https://play.example/game"
+
+        assert switch_to_new_tab(driver, "home", timeout=1) is True
+        driver.switch_to.window.assert_called_once_with("game")
+
+    @patch("game_launcher.time.sleep", return_value=None)
+    def test_timeout_when_no_new_tab(self, _mock_sleep):
+        from game_launcher import switch_to_new_tab
+
+        driver = Mock()
+        driver.window_handles = ["home"]
+
+        # 第一次构造 deadline，之后始终超过 deadline
+        times = iter([100.0, 101.5, 101.6, 101.7, 101.8])
+        with patch("game_launcher.time.time", side_effect=lambda: next(times, 102.0)):
+            assert switch_to_new_tab(driver, "home", timeout=1) is False
+        driver.switch_to.window.assert_not_called()
+
+    @patch("game_launcher.time.sleep", return_value=None)
+    def test_waits_until_new_tab_appears(self, _mock_sleep):
+        from game_launcher import switch_to_new_tab
+
+        driver = Mock()
+        driver.current_url = "https://play.example/game"
+        polls = {"n": 0}
+
+        def _handles(_self=None):
+            polls["n"] += 1
+            if polls["n"] == 1:
+                return ["home"]
+            return ["home", "game"]
+
+        type(driver).window_handles = property(_handles)
+
+        with patch("game_launcher.time.time", side_effect=[0.0, 0.1, 0.2, 0.3]):
+            assert switch_to_new_tab(driver, "home", timeout=5) is True
+        driver.switch_to.window.assert_called_once_with("game")
 
 
 # ========== 截图任务配置测试 ==========
@@ -481,6 +553,7 @@ if __name__ == "__main__":
         TestPlatformBounds(),
         TestPopupThresholds(),
         TestNavigatorThreshold(),
+        TestSwitchToNewTab(),
         TestScreenshotTasks(),
     ]
 

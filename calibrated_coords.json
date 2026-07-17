@@ -1,114 +1,114 @@
 {
-  "avatar": [
-    669,
-    239
-  ],
-  "nobility_icon": [
-    1975,
-    241
-  ],
-  "shop_icon": [
-    2487,
-    406
-  ],
-  "customize_icon": [
-    1152,
-    1224
-  ],
-  "back_arrow": [
-    682,
-    236
-  ],
-  "settings_icon": [
-    2386,
-    241
-  ],
-  "tab_home": [
-    695,
-    383
-  ],
-  "tab_hero": [
-    689,
-    625
-  ],
-  "tab_illustrated": [
-    706,
-    748
-  ],
-  "universal_illustrated": [
-    685,
-    853
-  ],
-  "lingbao": [
-    1129,
-    470
-  ],
-  "skin_illustrated": [
-    695,
-    962
-  ],
-  "lottery_tab": [
-    2279,
-    1235
-  ],
-  "points_lottery": [
-    689,
-    507
-  ],
-  "skin_customize": [
-    702,
-    378
-  ],
-  "minion": [
-    2382,
-    457
-  ],
-  "personal_customize": [
-    717,
-    493
-  ],
-  "poke": [
-    693,
-    606
+  "game_logout_btn": [
+    2463,
+    122
   ],
   "game_wx_ios": [
-    942,
-    1066
+    897,
+    958
   ],
   "game_wx_android": [
-    1356,
-    1067
+    1317,
+    959
   ],
   "game_qq_ios": [
-    1781,
-    1068
+    1731,
+    960
   ],
   "game_qq_android": [
     2179,
-    1060
+    958
   ],
   "game_login_other": [
-    1564,
-    892
+    1533,
+    787
   ],
   "enter_game": [
-    1576,
-    1051
-  ],
-  "game_logout_btn": [
-    2444,
-    230
+    1541,
+    938
   ],
   "game_logout_confirm": [
-    1765,
-    1025
+    1743,
+    926
   ],
   "game_popup_confirm": [
-    1765,
-    1025
+    1746,
+    875
+  ],
+  "avatar": [
+    659,
+    147
+  ],
+  "nobility_icon": [
+    1971,
+    143
+  ],
+  "shop_icon": [
+    2478,
+    311
+  ],
+  "customize_icon": [
+    1148,
+    1120
+  ],
+  "settings_icon": [
+    2394,
+    140
+  ],
+  "back_arrow": [
+    692,
+    138
+  ],
+  "tab_home": [
+    693,
+    272
+  ],
+  "tab_hero": [
+    687,
+    516
+  ],
+  "tab_illustrated": [
+    696,
+    641
+  ],
+  "universal_illustrated": [
+    692,
+    751
+  ],
+  "lingbao": [
+    1144,
+    340
+  ],
+  "skin_illustrated": [
+    695,
+    844
+  ],
+  "lottery_tab": [
+    2236,
+    1130
+  ],
+  "points_lottery": [
+    698,
+    406
+  ],
+  "skin_customize": [
+    707,
+    279
+  ],
+  "minion": [
+    2371,
+    349
+  ],
+  "personal_customize": [
+    699,
+    393
+  ],
+  "poke": [
+    699,
+    505
   ],
   "settings_logout": [
-    2193,
-    1136
+    2255,
+    1028
   ]
 }

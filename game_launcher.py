@@ -8,6 +8,49 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 from config import GAME_LAUNCH_WAIT, PAGE_LOAD_WAIT
+from logger import get_logger
+
+log = get_logger()
+
+
+def switch_to_new_tab(
+    driver: WebDriver,
+    original_handle: str,
+    timeout: float = GAME_LAUNCH_WAIT,
+) -> bool:
+    """等待秒玩打开的新标签页并切换过去。
+
+    云游戏在第二个标签页运行；若 WebDriver 仍停在先锋首页标签，
+    后续截图/点击会把浏览器焦点拉回第一个标签页。
+
+    Args:
+        driver: Selenium WebDriver。
+        original_handle: 点击秒玩前的 window handle。
+        timeout: 等待新标签出现的最长时间（秒）。
+
+    Returns:
+        bool: 成功切换到新标签返回 True，超时返回 False。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        new_handles = [h for h in driver.window_handles if h != original_handle]
+        if new_handles:
+            target = new_handles[-1]
+            driver.switch_to.window(target)
+            try:
+                url = driver.current_url
+            except Exception:
+                url = "(unknown)"
+            log.info(
+                f"已切换到云游戏标签页 (handles={len(driver.window_handles)}, url={url})"
+            )
+            return True
+        time.sleep(0.5)
+
+    log.error(
+        f"超时未出现新标签页（仍为 {len(driver.window_handles)} 个）"
+    )
+    return False
 
 
 def _dismiss_popups(driver: WebDriver) -> None:
@@ -112,8 +155,10 @@ def launch_game(driver: WebDriver) -> bool:
         if not play_btn.is_displayed():
             raise Exception("秒玩按钮不可见")
 
+        original_handle = driver.current_window_handle
         driver.execute_script("arguments[0].click();", play_btn)
         print("[启动] 已点击【王者荣耀】的'秒玩'按钮")
+        log.info(f"已点击秒玩，原标签 handle={original_handle}")
 
     except Exception as e:
         print(f"[错误] 找不到王者荣耀的秒玩按钮: {e}")
@@ -121,10 +166,16 @@ def launch_game(driver: WebDriver) -> bool:
         return False
 
     # ------------------------------------------------------------------
-    # 4. 等待桌面客户端启动游戏
+    # 4. 等待云游戏新标签页并切换（秒玩会打开第二个标签）
     # ------------------------------------------------------------------
-    print(f"[启动] 等待桌面客户端启动游戏 ({GAME_LAUNCH_WAIT} 秒)...")
-    time.sleep(GAME_LAUNCH_WAIT)
+    print(f"[启动] 等待云游戏新标签页 (最多 {GAME_LAUNCH_WAIT} 秒)...")
+    if not switch_to_new_tab(driver, original_handle, timeout=GAME_LAUNCH_WAIT):
+        print("[错误] 未检测到云游戏新标签页，WebDriver 仍停在先锋首页")
+        driver.save_screenshot("debug_no_game_tab.png")
+        return False
 
-    print("[启动] ✅ 游戏启动流程完成")
+    # 新标签已打开，再稍等画面加载
+    time.sleep(PAGE_LOAD_WAIT)
+
+    print("[启动] ✅ 游戏启动流程完成（已切换到云游戏标签页）")
     return True

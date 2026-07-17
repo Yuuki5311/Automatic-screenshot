@@ -118,7 +118,7 @@ class Navigator:
     def find_and_click(
         self, template_name: str, timeout: int = 10,
         bounds: tuple = None, max_retries: int = None,
-        threshold: float = None, allow_fallback: bool = True,
+        threshold: float = None, allow_fallback: bool = False,
     ) -> bool:
         """在浏览器画面中匹配模板图并点击其中心位置。
 
@@ -129,6 +129,7 @@ class Navigator:
             max_retries: 最大重试次数，默认使用 self.max_retries。
             threshold: 匹配置信度阈值，默认使用 self.threshold。
             allow_fallback: 模板匹配失败时是否使用坐标兜底点击。
+                默认 False（诊断：仅主页头像/小兵通过 GUI ``__coords__`` 走坐标点击）。
 
         Returns:
             bool: 匹配成功并点击返回 True，否则 False。
@@ -170,6 +171,8 @@ class Navigator:
 
             time.sleep(RETRY_INTERVAL)
 
+        # 诊断模式：find_and_click 默认不做坐标兜底。
+        # 主页头像 / 小兵仅由 GUI 的 __coords__ 显式坐标点击保留。
         if allow_fallback:
             coords = self._load_coords()
             key = template_name.replace(".png", "")
