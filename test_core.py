@@ -15,6 +15,29 @@ import cv2
 from config import TEMPLATES_DIR, resource_path
 
 
+# ========== Windows Edge 启动测试 ==========
+
+class TestEdgeBrowserStartup:
+    """验证 Windows Edge 使用 Selenium Manager 管理驱动。"""
+
+    @patch("browser.webdriver.Edge")
+    def test_edge_does_not_use_webdriver_manager(self, mock_edge):
+        """Edge 启动不应访问 webdriver-manager 的微软驱动源。"""
+        from browser import _create_edge
+
+        driver = Mock()
+        mock_edge.return_value = driver
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SE_MSEDGEDRIVER_MIRROR_URL", None)
+            assert _create_edge(1920, 1080) is driver
+            assert os.environ["SE_MSEDGEDRIVER_MIRROR_URL"] == (
+                "https://msedgedriver.microsoft.com"
+            )
+            _, kwargs = mock_edge.call_args
+            assert "service" not in kwargs
+
+
 # ========== Navigator 模板缓存测试 ==========
 
 class TestTemplateCache:

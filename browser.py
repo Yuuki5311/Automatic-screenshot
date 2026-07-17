@@ -1,7 +1,7 @@
 """反检测浏览器初始化。
 
 绕过 gamer.qq.com 等网站对 Selenium 自动化特征的检测。
-使用 webdriver-manager 自动管理驱动版本。
+使用 Selenium Manager 自动管理 Windows EdgeDriver。
 
 平台适配:
     macOS  → Google Chrome + ChromeDriver
@@ -9,15 +9,14 @@
 """
 
 import platform
+import os
 import subprocess
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.edge.options import Options as EdgeOptions
-from selenium.webdriver.edge.service import Service as EdgeService
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.microsoft import EdgeChromiumDriverManager
 
 
 # CDP 注入脚本：在页面加载前执行，隐藏自动化特征
@@ -140,8 +139,13 @@ def _create_edge(width: int, height: int) -> webdriver.Edge:
     }
     options.add_experimental_option("prefs", prefs)
 
-    service = EdgeService(EdgeChromiumDriverManager().install())
-    driver = webdriver.Edge(service=service, options=options)
+    # webdriver-manager 仍访问已停用的 msedgedriver.azureedge.net。
+    # 改由 Selenium Manager 管理驱动，并明确指定微软的新官方下载源。
+    os.environ.setdefault(
+        "SE_MSEDGEDRIVER_MIRROR_URL",
+        "https://msedgedriver.microsoft.com",
+    )
+    driver = webdriver.Edge(options=options)
 
     # Edge 同样支持 CDP（Chromium 内核）
     driver.execute_cdp_cmd(
