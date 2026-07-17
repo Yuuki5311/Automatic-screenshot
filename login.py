@@ -13,7 +13,6 @@ from typing import Callable
 
 import cv2
 import numpy as np
-import pyautogui
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -323,11 +322,11 @@ def game_login(
         # ---- 检测二维码是否出现 ----
         if not qr_appeared:
             try:
-                screenshot = pyautogui.screenshot()
-                frame = np.array(screenshot)
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                del screenshot
-                del frame
+                png = nav.driver.get_screenshot_as_png()
+                frame_bgr = cv2.imdecode(
+                    np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
+                )
+                del png
                 data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
                 if bbox is not None and len(bbox) > 0:
                     qr_appeared = True
