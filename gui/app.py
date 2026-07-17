@@ -336,8 +336,6 @@ class App(tk.Tk):
         from screenshotter import Screenshotter
         from popup_monitor import PopupMonitor
         from logger import get_logger
-        import pyautogui
-        pyautogui.FAILSAFE = False  # 自动化脚本禁用角落保护
         import os
         import json
 
@@ -410,15 +408,13 @@ class App(tk.Tk):
                 # ---- 清除游戏启动后的弹窗（仅首次） ----
                 self._send({"type": "log", "text": "等待 10 秒后清除初始弹窗..."})
                 time.sleep(10)
-                # 点击屏幕空白区域消除弹窗
-                sw, sh = pyautogui.size()
-                pyautogui.click(int(sw * 0.5), int(sh * 0.85))
+                _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
+                _nav.click_css(BROWSER_WIDTH // 2, int(BROWSER_HEIGHT * 0.85))
                 self._send({"type": "log", "text": "已尝试清除弹窗"})
 
                 # ---- 3a. 退出当前登录（仅首次，防止自动登录残留） ----
                 self._send({"type": "log", "text": "等待游戏窗口..."})
                 time.sleep(2)
-                _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
                 monitor = PopupMonitor(navigator=_nav)
 
                 # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 冷却等待
@@ -444,8 +440,7 @@ class App(tk.Tk):
                 else:
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    sw, sh = pyautogui.size()
-                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
+                    confirm_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
                     _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
                     self._send({"type": "log", "text": "已确认退出登录"})
 
@@ -458,7 +453,7 @@ class App(tk.Tk):
                     return
 
                 self._send({"type": "log", "text": "正在退出当前游戏登录...", "level": "info"})
-                _nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+                _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
                 monitor = PopupMonitor(navigator=_nav)
 
                 # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 冷却等待
@@ -484,8 +479,7 @@ class App(tk.Tk):
                 else:
                     self._send({"type": "log", "text": "已点击退出登录"})
                     time.sleep(2)
-                    sw, sh = pyautogui.size()
-                    confirm_bounds = (0, int(sh * _nav._scale * 0.5), int(sw * _nav._scale), int(sh * _nav._scale * 0.5))
+                    confirm_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
                     _nav.find_and_click("game_logout_confirm.png", timeout=3, bounds=confirm_bounds)
                     self._send({"type": "log", "text": "已确认退出登录"})
 
@@ -500,7 +494,7 @@ class App(tk.Tk):
                 _nav.cleanup()
 
             self._send({"type": "log", "text": "等待游戏窗口..."})
-            nav = Navigator(templates_dir=resource_path(TEMPLATES_DIR))
+            nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
 
             # ====== 阶段 3: 游戏登录（最多重试 3 次） ======
             GAME_LOGIN_MAX_RETRIES = 3
@@ -589,13 +583,12 @@ class App(tk.Tk):
             if not account:
                 account = f"unknown_{time.strftime('%H%M%S')}"
             shot = Screenshotter(
-                output_dir=os.path.join(writable_path(SCREENSHOTS_DIR), account)
+                output_dir=os.path.join(writable_path(SCREENSHOTS_DIR), account),
+                driver=driver,
             )
 
-            screen_w, screen_h = pyautogui.size()
-            # Intentional private attr access (avoids public API change to Navigator in this task)
-            avatar_bounds = (0, 0, int(screen_w * nav._scale * 0.4), int(screen_h * nav._scale * 0.5))
-            nobility_bounds = (0, 0, int(screen_w * nav._scale), int(screen_h * nav._scale * 0.5))
+            avatar_bounds = (0, 0, int(BROWSER_WIDTH * 0.4), int(BROWSER_HEIGHT * 0.5))
+            nobility_bounds = (0, 0, BROWSER_WIDTH, int(BROWSER_HEIGHT * 0.5))
 
             # 加载绝对坐标（缺省值兜底，用户可通过 calibrate_coords.py 覆盖）
             _coords = {}
@@ -728,12 +721,12 @@ class App(tk.Tk):
                         # 坐标点击
                         if template == "__coords__":
                             x, y = bounds
-                            pyautogui.click(x, y)
+                            nav.click_css(x, y)
                             self._send({"type": "log", "text": f"  🖱 坐标点击 ({x}, {y})"})
                             _log.info(f"坐标点击 ({x}, {y})")
                             time.sleep(CLICK_INTERVAL)
                             consecutive_failures = 0
-                            last_step = (anchor, lambda _x=x, _y=y: pyautogui.click(_x, _y))
+                            last_step = (anchor, lambda _x=x, _y=y: nav.click_css(_x, _y))
 
                         elif not nav.find_and_click(template, bounds=bounds):
                             consecutive_failures += 1
@@ -799,7 +792,6 @@ class App(tk.Tk):
 
             # ====== 退出游戏登录 ======
             self._send({"type": "log", "text": "正在退出游戏登录...", "level": "info"})
-            sw, sh = pyautogui.size()
             LOGOUT_MAX_RETRIES = 3
 
             for logout_attempt in range(1, LOGOUT_MAX_RETRIES + 1):
@@ -808,8 +800,8 @@ class App(tk.Tk):
 
                 # 1. 点击右上角设置按钮
                 settings_bounds = (
-                    int(sw * nav._scale * 0.8), 0,
-                    int(sw * nav._scale * 0.2), int(sh * nav._scale * 0.3),
+                    int(BROWSER_WIDTH * 0.8), 0,
+                    int(BROWSER_WIDTH * 0.2), int(BROWSER_HEIGHT * 0.3),
                 )
                 if not nav.find_and_click("settings_icon.png", timeout=5, bounds=settings_bounds):
                     self._send({"type": "log", "text": f"未找到设置按钮，重试 ({logout_attempt}/{LOGOUT_MAX_RETRIES})...", "level": "warn"})
@@ -821,12 +813,12 @@ class App(tk.Tk):
 
                 # 2. 点击右下角「退出登录」
                 logout_bounds = (
-                    0, int(sh * nav._scale * 0.6),
-                    int(sw * nav._scale), int(sh * nav._scale * 0.4),
+                    0, int(BROWSER_HEIGHT * 0.6),
+                    BROWSER_WIDTH, int(BROWSER_HEIGHT * 0.4),
                 )
                 if not nav.find_and_click("settings_logout.png", timeout=5, bounds=logout_bounds):
                     # settings_logout 未匹配则点屏幕下方
-                    pyautogui.click(int(sw * 0.5), int(sh * 0.8))
+                    nav.click_css(BROWSER_WIDTH // 2, int(BROWSER_HEIGHT * 0.8))
                     self._send({"type": "log", "text": f"未找到退出登录按钮，重试 ({logout_attempt}/{LOGOUT_MAX_RETRIES})...", "level": "warn"})
                     time.sleep(2)
                     continue
@@ -836,8 +828,8 @@ class App(tk.Tk):
 
                 # 3. 确认退出
                 confirm_bounds = (
-                    0, int(sh * nav._scale * 0.5),
-                    int(sw * nav._scale), int(sh * nav._scale * 0.5),
+                    0, BROWSER_HEIGHT // 2,
+                    BROWSER_WIDTH, BROWSER_HEIGHT // 2,
                 )
                 nav.find_and_click("game_popup_confirm.png", timeout=3, bounds=confirm_bounds)
                 self._send({"type": "log", "text": "已确认退出登录"})

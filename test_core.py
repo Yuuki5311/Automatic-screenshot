@@ -235,53 +235,34 @@ class TestPopupMonitor:
 # ========== 平台选择 bounds 计算测试 ==========
 
 class TestPlatformBounds:
-    """测试 game_login 中平台选择的搜索区域计算。"""
+    """测试 game_login 中平台选择的搜索区域计算（CSS 视口像素）。"""
 
-    @patch("pyautogui.size")
-    def test_wx_platform_left_half(self, mock_size):
+    def test_wx_platform_left_half(self):
         """微信平台应搜索左半边。"""
-        mock_size.return_value = (1470, 956)
-        # 重新导入以使用 mock 的 pyautogui.size()
-        import pyautogui
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT
 
-        # 模拟 Navigator
-        nav = Mock()
-        nav._scale = 2.0
-
-        screen_w, screen_h = pyautogui.size()
-        scale = nav._scale
         platform = "wx_android"
 
         if platform.startswith("wx"):
-            bounds = (0, 0, int(screen_w * scale * 0.5), int(screen_h * scale))
+            bounds = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
         else:
-            bounds = (int(screen_w * scale * 0.5), 0,
-                      int(screen_w * scale * 0.5), int(screen_h * scale))
+            bounds = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
 
-        expected = (0, 0, 1470, 1912)  # 左半边
+        expected = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
         assert bounds == expected, f"微信 bounds 应为左半边，实际 {bounds}"
 
-    @patch("pyautogui.size")
-    def test_qq_platform_right_half(self, mock_size):
+    def test_qq_platform_right_half(self):
         """QQ 平台应搜索右半边。"""
-        mock_size.return_value = (1470, 956)
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT
 
-        import pyautogui
-
-        nav = Mock()
-        nav._scale = 2.0
-
-        screen_w, screen_h = pyautogui.size()
-        scale = nav._scale
         platform = "qq_android"
 
         if platform.startswith("wx"):
-            bounds = (0, 0, int(screen_w * scale * 0.5), int(screen_h * scale))
+            bounds = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
         else:
-            bounds = (int(screen_w * scale * 0.5), 0,
-                      int(screen_w * scale * 0.5), int(screen_h * scale))
+            bounds = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
 
-        expected = (1470, 0, 1470, 1912)  # 右半边
+        expected = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
         assert bounds == expected, f"QQ bounds 应为右半边，实际 {bounds}"
 
 
@@ -290,20 +271,17 @@ class TestPlatformBounds:
 class TestPopupSafety:
     """验证同步与异步通用扫描只操作安全的关闭按钮。"""
 
-    @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
-    def test_scan_checks_exact_close_allowlist_with_shared_bounds(
-        self, _mock_size
-    ):
+    def test_scan_checks_exact_close_allowlist_with_shared_bounds(self):
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT
         from popup_monitor import PopupMonitor
 
         nav = Mock()
-        nav._scale = 2.0
         nav.wait_for_template.side_effect = [False, False]
         monitor = PopupMonitor(navigator=nav)
 
         assert monitor._do_scan() is False
 
-        top_bounds = (0, 0, 2940, 956)
+        top_bounds = (0, 0, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
         assert [
             call.args[0] for call in nav.wait_for_template.call_args_list
         ] == ["popup_close.png", "popup_close_small.png"]
@@ -312,21 +290,20 @@ class TestPopupSafety:
             assert call.kwargs["bounds"] == top_bounds
 
     @patch("popup_monitor.time.sleep", return_value=None)
-    @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
     def test_scan_uses_close_only_allowlist_and_disables_fallback(
-        self, _mock_size, _mock_sleep
+        self, _mock_sleep
     ):
+        from config import BROWSER_WIDTH, BROWSER_HEIGHT
         from popup_monitor import PopupMonitor
 
         nav = Mock()
-        nav._scale = 2.0
         nav.wait_for_template.side_effect = [True, True, False]
         nav.find_and_click.return_value = True
         monitor = PopupMonitor(navigator=nav)
 
         assert monitor._do_scan() is True
 
-        top_bounds = (0, 0, 2940, 956)
+        top_bounds = (0, 0, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
         nav.find_and_click.assert_called_once_with(
             "popup_close.png",
             timeout=2,
@@ -345,21 +322,15 @@ class TestPopupSafety:
             assert call.kwargs["bounds"] == top_bounds
 
     @patch("popup_monitor.time.sleep", return_value=None)
-    @patch("popup_monitor.pyautogui.click")
-    @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
-    def test_scan_never_uses_blank_area_fallback(
-        self, _mock_size, mock_click, _mock_sleep
-    ):
+    def test_scan_never_uses_blank_area_fallback(self, _mock_sleep):
         from popup_monitor import PopupMonitor
 
         nav = Mock()
-        nav._scale = 2.0
         nav.wait_for_template.return_value = True
         nav.find_and_click.return_value = False
         monitor = PopupMonitor(navigator=nav)
 
         assert monitor._do_scan() is False
-        mock_click.assert_not_called()
 
 
 # ========== Navigator threshold 参数兼容性测试 ==========
@@ -473,9 +444,7 @@ class TestScreenshotTasks:
 
     def test_all_tasks_have_valid_structure(self):
         """每个任务应有名称、按钮列表、返回次数。"""
-        # 模拟屏幕尺寸创建 bounds
-        with patch("pyautogui.size", return_value=(1470, 956)):
-            screenshot_tasks = [
+        screenshot_tasks = [
                 ("主页", [("avatar.png", "desc1", None), ("tab_home.png", "desc2")], 0),
                 ("英雄", [("tab_hero.png", "desc")], 0),
                 ("万象图鉴首页", [("tab_illustrated.png", "desc"), ("universal_illustrated.png", "desc")], 0),
@@ -487,19 +456,19 @@ class TestScreenshotTasks:
                 ("贵族", [("nobility_icon.png", "desc", None)], 1),
             ]
 
-            for name, clicks, back_count in screenshot_tasks:
-                assert isinstance(name, str) and len(name) > 0, f"任务名无效: {name}"
-                assert len(clicks) > 0, f"{name} 按钮列表为空"
-                assert isinstance(back_count, int) and back_count >= 0, \
-                    f"{name} back_count 无效"
+        for name, clicks, back_count in screenshot_tasks:
+            assert isinstance(name, str) and len(name) > 0, f"任务名无效: {name}"
+            assert len(clicks) > 0, f"{name} 按钮列表为空"
+            assert isinstance(back_count, int) and back_count >= 0, \
+                f"{name} back_count 无效"
 
-                for item in clicks:
-                    if len(item) == 2:
-                        template, desc = item
-                    else:
-                        template, desc = item[:2]
-                    assert isinstance(template, str), f"{name} 模板名无效"
-                    assert template.endswith(".png"), f"{name} 模板 {template} 应为 .png"
+            for item in clicks:
+                if len(item) == 2:
+                    template, desc = item
+                else:
+                    template, desc = item[:2]
+                assert isinstance(template, str), f"{name} 模板名无效"
+                assert template.endswith(".png"), f"{name} 模板 {template} 应为 .png"
 
 
 if __name__ == "__main__":

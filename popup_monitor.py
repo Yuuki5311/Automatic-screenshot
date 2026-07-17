@@ -6,8 +6,7 @@
 import time
 import threading
 
-import pyautogui
-
+from config import BROWSER_WIDTH, BROWSER_HEIGHT
 from logger import get_logger
 
 log = get_logger()
@@ -47,9 +46,7 @@ class PopupMonitor:
         if self.navigator is None:
             return False
         try:
-            sw, sh = pyautogui.size()
-            scale = self.navigator._scale
-            top_bounds = (0, 0, int(sw * scale), int(sh * scale * 0.5))
+            top_bounds = (0, 0, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
 
             buttons = [
                 ("popup_close.png", top_bounds, "X按钮", 0.85),

@@ -21,7 +21,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from selenium.common.exceptions import NoSuchElementException
 
-from config import CLOUD_GAMING_URL, PAGE_LOAD_WAIT
+from config import BROWSER_WIDTH, BROWSER_HEIGHT, CLOUD_GAMING_URL, PAGE_LOAD_WAIT
 from logger import get_logger
 
 log = get_logger()
@@ -257,15 +257,12 @@ def game_login(
         on_status(f"未知的平台选择: {platform}")
         return False
 
-    # ---- 计算搜索区域 ----
-    screen_w, screen_h = pyautogui.size()
-    scale = nav._scale
-
+    # ---- 计算搜索区域（CSS 视口像素） ----
     # 平台按钮：微信在左半边，QQ 在右半边
     if platform.startswith("wx"):
-        platform_bounds = (0, 0, int(screen_w * scale * 0.5), int(screen_h * scale))
+        platform_bounds = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
     else:
-        platform_bounds = (int(screen_w * scale * 0.5), 0, int(screen_w * scale * 0.5), int(screen_h * scale))
+        platform_bounds = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
 
     # ---- 1. 点击平台登录按钮 ----
     on_status(f"选择登录平台: {platform_name}...")
@@ -279,7 +276,7 @@ def game_login(
 
     # ---- 1a. 检查「登录其他账号」弹窗 ----
     time.sleep(2)
-    login_other_bounds = (0, int(screen_h * scale * 0.5), int(screen_w * scale), int(screen_h * scale * 0.5))
+    login_other_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
     if nav.find_and_click("game_login_other.png", timeout=3, bounds=login_other_bounds):
         on_status("已点击「登录其他账号」")
         time.sleep(2)
