@@ -175,32 +175,60 @@ class TestPlatformBounds:
         assert bounds == expected, f"QQ bounds 应为右半边，实际 {bounds}"
 
 
-# ========== PopupMonitor 按钮阈值配置测试 ==========
+# ========== PopupMonitor 安全白名单测试 ==========
 
-class TestPopupThresholds:
-    """测试 popup_monitor 中各按钮的阈值配置。"""
+class TestPopupSafety:
+    """验证后台监控只操作安全的关闭按钮。"""
 
-    def test_thresholds_configured_correctly(self):
-        """验证 4 个按钮都有正确的阈值配置。"""
+    @patch("popup_monitor.time.sleep", return_value=None)
+    @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
+    def test_scan_uses_close_only_allowlist_and_disables_fallback(
+        self, _mock_size, _mock_sleep
+    ):
         from popup_monitor import PopupMonitor
 
         nav = Mock()
         nav._scale = 2.0
+        nav.wait_for_template.side_effect = [True, True, False]
+        nav.find_and_click.return_value = True
         monitor = PopupMonitor(navigator=nav)
 
-        # 直接访问内部方法，但不执行（因为需要真实截图）
-        # 改为验证配置结构
-        import inspect
-        source = inspect.getsource(monitor._do_scan)
+        assert monitor._do_scan() is True
 
-        # 验证 buttons 配置
-        assert "popup_close.png" in source, "应包含 popup_close.png"
-        assert "popup_close_small.png" in source, "应包含 popup_close_small.png"
-        assert "game_logout_confirm.png" in source, "应包含 game_logout_confirm.png"
-        assert "game_popup_confirm.png" in source, "应包含 game_popup_confirm.png"
+        top_bounds = (0, 0, 2940, 956)
+        nav.find_and_click.assert_called_once_with(
+            "popup_close.png",
+            timeout=2,
+            bounds=top_bounds,
+            threshold=0.85,
+            allow_fallback=False,
+        )
+        checked_templates = [
+            call.args[0] for call in nav.wait_for_template.call_args_list
+        ]
+        assert set(checked_templates) <= {
+            "popup_close.png",
+            "popup_close_small.png",
+        }
+        for call in nav.wait_for_template.call_args_list:
+            assert call.kwargs["bounds"] == top_bounds
 
-        # 验证高阈值按钮（高于默认 0.53 以减少误匹配）
-        assert "0.85" in source, "popup_close 应有 0.85 阈值"
+    @patch("popup_monitor.time.sleep", return_value=None)
+    @patch("popup_monitor.pyautogui.click")
+    @patch("popup_monitor.pyautogui.size", return_value=(1470, 956))
+    def test_scan_never_uses_blank_area_fallback(
+        self, _mock_size, mock_click, _mock_sleep
+    ):
+        from popup_monitor import PopupMonitor
+
+        nav = Mock()
+        nav._scale = 2.0
+        nav.wait_for_template.return_value = True
+        nav.find_and_click.return_value = False
+        monitor = PopupMonitor(navigator=nav)
+
+        assert monitor._do_scan() is False
+        mock_click.assert_not_called()
 
 
 # ========== Navigator threshold 参数兼容性测试 ==========

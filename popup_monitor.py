@@ -42,8 +42,7 @@ class PopupMonitor:
     def _do_scan(self) -> bool:
         """执行一次弹窗扫描+关闭（不检查暂停状态，供内部和 close_all_popups 复用）。
 
-        一轮内遍历所有按钮模板，尽可能关闭多个弹窗。
-        如果点击 X 按钮无效，兜底点击屏幕空白区域。
+        一轮内遍历关闭按钮模板，尽可能关闭多个弹窗。
         """
         if self.navigator is None:
             return False
@@ -51,49 +50,40 @@ class PopupMonitor:
             sw, sh = pyautogui.size()
             scale = self.navigator._scale
             top_bounds = (0, 0, int(sw * scale), int(sh * scale * 0.5))
-            bottom_bounds = (0, int(sh * scale * 0.5), int(sw * scale), int(sh * scale * 0.5))
 
-            # (模板文件, 搜索区域, 标签, 置信度阈值)
-            # 阈值None则使用Navigator默认值(0.53)
             buttons = [
                 ("popup_close.png", top_bounds, "X按钮", 0.85),
                 ("popup_close_small.png", top_bounds, "小弹窗X按钮", 0.85),
-                ("game_logout_confirm.png", bottom_bounds, "确认按钮", None),
-                ("game_popup_confirm.png", bottom_bounds, "通用确认", None),
             ]
 
-            found_any = False
             closed_this_round = 0
 
             for template, bounds, label, threshold in buttons:
-                kwargs = {}
-                if threshold is not None:
-                    kwargs["threshold"] = threshold
-
+                kwargs = {"threshold": threshold, "bounds": bounds}
                 if self.navigator.wait_for_template(template, timeout=1, **kwargs):
-                    # 双重校验：等待 0.5s 后再次确认
-                    # 按钮在弹窗出现后 0.5~1s 内处于禁用状态
                     time.sleep(0.5)
-                    if not self.navigator.wait_for_template(template, timeout=0.5, **kwargs):
+                    if not self.navigator.wait_for_template(
+                        template, timeout=0.5, **kwargs
+                    ):
                         continue
-                    found_any = True
-                    # 等待按钮完全可点击（距首次检测至少 1s）
                     time.sleep(2)
-                    if self.navigator.find_and_click(template, timeout=2, bounds=bounds, **kwargs):
-                        # 关闭后等待 0.5s 冷却期
+                    if self.navigator.find_and_click(
+                        template,
+                        timeout=2,
+                        bounds=bounds,
+                        threshold=threshold,
+                        allow_fallback=False,
+                    ):
                         time.sleep(1)
-                        if not self.navigator.wait_for_template(template, timeout=1, **kwargs):
+                        if not self.navigator.wait_for_template(
+                            template, timeout=1, **kwargs
+                        ):
                             self._closed_count += 1
                             closed_this_round += 1
-                            log.info(f"异步关闭弹窗 #{self._closed_count} ({label})")
-                            break  # 关一个就退出，多的由外层循环处理
-                        else:
-                            log.debug(f"点击 {label} 后仍在，尝试下一个")
-
-            # 兜底：有弹窗但本轮一个都没关掉时，点击屏幕空白区域
-            if found_any and closed_this_round == 0:
-                log.debug("兜底：点击空白区域尝试消除弹窗")
-                pyautogui.click(int(sw * 0.5), int(sh * 0.85))
+                            log.info(
+                                f"异步关闭弹窗 #{self._closed_count} ({label})"
+                            )
+                            break
 
             return closed_this_round > 0
 
