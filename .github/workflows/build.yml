@@ -24,7 +24,7 @@ jobs:
       - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install pyautogui pillow opencv-python-headless numpy selenium webdriver-manager
+          pip install -r requirements.txt
           pip install pyinstaller
 
       - name: 打包 exe
@@ -42,6 +42,9 @@ jobs:
             --hidden-import selenium `
             --hidden-import selenium.webdriver.chrome.service `
             --hidden-import selenium.webdriver.chrome.options `
+            --hidden-import selenium.webdriver.edge.service `
+            --hidden-import selenium.webdriver.edge.options `
+            --collect-binaries selenium `
             --hidden-import webdriver_manager `
             --hidden-import webdriver_manager.chrome `
             --hidden-import webdriver_manager.core.os_manager `
@@ -51,6 +54,12 @@ jobs:
             --add-data "templates;templates" `
             --add-data "calibrated_coords.json;." `
             main.py
+
+      - name: 验证构建产物
+        run: |
+          if (-not (Test-Path "dist/AutoScreenshot.exe")) {
+            throw "未生成 dist/AutoScreenshot.exe"
+          }
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
