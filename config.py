@@ -54,3 +54,15 @@ def resource_path(relative_path: str) -> str:
     else:
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative_path)
+
+
+def app_dir() -> str:
+    """返回运行时可写文件的根目录。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def writable_path(relative_path: str) -> str:
+    """获取截图、日志等运行时输出的绝对路径。"""
+    return os.path.join(app_dir(), relative_path)

@@ -15,6 +15,46 @@ import cv2
 from config import TEMPLATES_DIR, resource_path
 
 
+# ========== 可写路径测试 ==========
+
+class TestWritablePath:
+    """测试 app_dir 和 writable_path 在开发与 EXE 环境下的行为。"""
+
+    def test_dev_app_dir_is_project_root(self):
+        """开发环境下 app_dir() 返回项目根目录。"""
+        import config
+
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        assert config.app_dir() == project_root
+
+    def test_dev_writable_path_screenshots(self):
+        """开发环境下 writable_path('screenshots') 返回项目根下的 screenshots。"""
+        import config
+
+        expected = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "screenshots"
+        )
+        assert config.writable_path("screenshots") == expected
+
+    def test_frozen_app_dir_is_exe_directory(self):
+        """模拟 EXE 环境时 app_dir() 返回 EXE 所在目录。"""
+        import config
+
+        exe_path = r"C:\Tools\AutoScreenshot.exe"
+        with patch.object(config.sys, "frozen", True, create=True), \
+             patch.object(config.sys, "executable", exe_path, create=True):
+            assert config.app_dir() == r"C:\Tools"
+
+    def test_frozen_writable_path_logs(self):
+        """模拟 EXE 环境时 writable_path('logs') 返回 EXE 目录下的 logs。"""
+        import config
+
+        exe_path = r"C:\Tools\AutoScreenshot.exe"
+        with patch.object(config.sys, "frozen", True, create=True), \
+             patch.object(config.sys, "executable", exe_path, create=True):
+            assert config.writable_path("logs") == r"C:\Tools\logs"
+
+
 # ========== Windows Edge 启动测试 ==========
 
 class TestEdgeBrowserStartup:
@@ -52,7 +92,7 @@ class TestTemplateCache:
 
         assert template is not None, "模板文件应能加载"
         assert isinstance(template, np.ndarray), "应返回 numpy 数组"
-        assert nav.templates_dir + "/avatar.png" in nav._template_cache, \
+        assert os.path.join(nav.templates_dir, "avatar.png") in nav._template_cache, \
             "加载后应存入缓存"
 
         # 第二次加载应命中缓存
