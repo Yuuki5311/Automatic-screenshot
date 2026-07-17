@@ -1,10 +1,21 @@
 """日志模块：同时输出到终端和文件。"""
 
 import logging
+import os
 import sys
 from datetime import datetime
 
+from config import writable_path
+
 _logger = None
+
+
+def default_log_file() -> str:
+    """创建默认日志目录并返回本次运行的日志文件路径。"""
+    log_dir = writable_path("logs")
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return os.path.join(log_dir, f"{timestamp}.log")
 
 
 def setup_logger(log_file: str = None) -> logging.Logger:
@@ -22,10 +33,7 @@ def setup_logger(log_file: str = None) -> logging.Logger:
         return _logger
 
     if log_file is None:
-        import os
-        os.makedirs("logs", exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file = f"logs/{timestamp}.log"
+        log_file = default_log_file()
 
     _logger = logging.getLogger("auto_screenshot")
     _logger.setLevel(logging.DEBUG)

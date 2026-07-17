@@ -55,6 +55,22 @@ class TestWritablePath:
             assert config.writable_path("logs") == r"C:\Tools\logs"
 
 
+# ========== 输出路径测试 ==========
+
+class TestOutputLocations:
+    """测试日志和截图输出路径使用 writable_path。"""
+
+    @patch("logger.writable_path", return_value=os.path.join("C:\\", "App", "logs"))
+    def test_default_log_file_uses_writable_path(self, mock_writable_path):
+        """default_log_file() 应通过 writable_path 定位日志目录。"""
+        from logger import default_log_file
+
+        result = default_log_file()
+        mock_writable_path.assert_called_once_with("logs")
+        assert os.path.dirname(result) == os.path.join("C:\\", "App", "logs")
+        assert result.endswith(".log")
+
+
 # ========== Windows Edge 启动测试 ==========
 
 class TestEdgeBrowserStartup:
