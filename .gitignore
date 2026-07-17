@@ -19,3 +19,7 @@ debug_*.png
 # IDE
 .vscode/
 .idea/
+
+# Agent 隔离工作区与进度记录
+.worktrees/
+.superpowers/
