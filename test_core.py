@@ -233,6 +233,58 @@ class TestNavigatorThreshold:
             "threshold 默认值应为 None"
 
 
+class TestNavigatorSafetyOptions:
+    """测试后台监控需要的安全匹配选项。"""
+
+    @patch("navigator.time.sleep", return_value=None)
+    @patch("navigator.pyautogui.click")
+    def test_find_and_click_can_disable_coordinate_fallback(
+        self, mock_click, _mock_sleep
+    ):
+        from navigator import Navigator
+
+        nav = Navigator.__new__(Navigator)
+        nav.threshold = 0.53
+        nav.max_retries = 1
+        nav._scale = 1.0
+        nav._load_template = Mock(return_value=np.ones((2, 2, 3), dtype=np.uint8))
+        nav._get_screenshot = Mock(return_value=np.zeros((8, 8, 3), dtype=np.uint8))
+        nav._load_coords = Mock(return_value={"popup_close": [10, 20]})
+
+        result = nav.find_and_click(
+            "popup_close.png",
+            max_retries=1,
+            threshold=1.1,
+            allow_fallback=False,
+        )
+
+        assert result is False
+        nav._load_coords.assert_not_called()
+        mock_click.assert_not_called()
+
+    @patch("navigator.time.sleep", return_value=None)
+    @patch("navigator.cv2.matchTemplate")
+    def test_wait_for_template_limits_matching_to_bounds(
+        self, mock_match, _mock_sleep
+    ):
+        from navigator import Navigator
+
+        nav = Navigator.__new__(Navigator)
+        nav.threshold = 0.53
+        nav._load_template = Mock(return_value=np.ones((2, 2, 3), dtype=np.uint8))
+        nav._get_screenshot = Mock(return_value=np.zeros((20, 30, 3), dtype=np.uint8))
+        mock_match.return_value = np.array([[1.0]], dtype=np.float32)
+
+        assert nav.wait_for_template(
+            "popup_close.png",
+            timeout=0.1,
+            bounds=(4, 5, 10, 8),
+        )
+
+        search_area = mock_match.call_args.args[0]
+        assert search_area.shape == (8, 10, 3)
+
+
 # ========== 截图任务配置测试 ==========
 
 class TestScreenshotTasks:

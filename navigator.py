@@ -136,7 +136,7 @@ class Navigator:
     def find_and_click(
         self, template_name: str, timeout: int = 10,
         bounds: tuple = None, max_retries: int = None,
-        threshold: float = None,
+        threshold: float = None, allow_fallback: bool = True,
     ) -> bool:
         """在全屏幕画面中匹配模板图并点击其中心位置。
 
@@ -146,6 +146,7 @@ class Navigator:
             bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素）。
             max_retries: 最大重试次数，默认使用 self.max_retries。
             threshold: 匹配置信度阈值，默认使用 self.threshold。
+            allow_fallback: 模板匹配失败时是否使用坐标兜底点击。
 
         Returns:
             bool: 匹配成功并点击返回 True，否则 False。
@@ -188,27 +189,28 @@ class Navigator:
 
             time.sleep(RETRY_INTERVAL)
 
-        # 兜底：坐标点击
-        coords = self._load_coords()
-        key = template_name.replace(".png", "")
-        if key in coords:
-            x, y = coords[key]
-            pyautogui.click(x, y)
-            log.info(f"兜底点击 {template_name} @ ({x}, {y})")
-            time.sleep(CLICK_INTERVAL)
-            return True
+        if allow_fallback:
+            coords = self._load_coords()
+            key = template_name.replace(".png", "")
+            if key in coords:
+                x, y = coords[key]
+                pyautogui.click(x, y)
+                log.info(f"兜底点击 {template_name} @ ({x}, {y})")
+                time.sleep(CLICK_INTERVAL)
+                return True
 
         log.warning(f"未能找到: {template_name}")
         return False
 
     def wait_for_template(self, template_name: str, timeout: int = 15,
-                          threshold: float = None) -> bool:
+                          threshold: float = None, bounds: tuple = None) -> bool:
         """轮询等待模板出现（不点击）。
 
         Args:
             template_name: 模板文件名。
             timeout: 最大等待时间（秒）。
             threshold: 匹配置信度阈值，默认使用 self.threshold。
+            bounds: 可选 (x, y, w, h) 限制搜索区域（物理像素）。
 
         Returns:
             bool: 在超时前检测到模板返回 True，否则 False。
@@ -224,7 +226,12 @@ class Navigator:
         start = time.time()
         while time.time() - start < timeout:
             screen = self._get_screenshot()
-            result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+            if bounds is not None:
+                x, y, w, h = bounds
+                search_area = screen[y:y+h, x:x+w]
+            else:
+                search_area = screen
+            result = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
             if max_val >= _threshold:
                 log.info(f"检测到 {template_name} (置信度 {max_val:.2f})")
