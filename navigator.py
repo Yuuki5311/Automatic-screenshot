@@ -92,6 +92,12 @@ class Navigator:
         """在浏览器视口 CSS 坐标 (x, y) 处点击。"""
         self.click_css(x, y)
 
+    def viewport_size(self) -> tuple[int, int]:
+        """返回当前匹配用截图的宽高（与 bounds / 点击同一像素空间）。"""
+        screen = self._get_screenshot()
+        h, w = screen.shape[:2]
+        return int(w), int(h)
+
     def _load_coords(self) -> dict:
         """懒加载 calibrated_coords.json，仅在首次兜底点击时触发。
 

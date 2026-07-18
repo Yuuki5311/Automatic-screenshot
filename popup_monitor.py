@@ -6,7 +6,6 @@
 import time
 import threading
 
-from config import BROWSER_WIDTH, BROWSER_HEIGHT
 from logger import get_logger
 
 log = get_logger()
@@ -46,7 +45,10 @@ class PopupMonitor:
         if self.navigator is None:
             return False
         try:
-            top_bounds = (0, 0, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
+            from login import top_half_bounds
+
+            vw, vh = self.navigator.viewport_size()
+            top_bounds = top_half_bounds(vw, vh)
 
             buttons = [
                 ("popup_close.png", top_bounds, "X按钮", 0.85),

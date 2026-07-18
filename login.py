@@ -26,6 +26,75 @@ from logger import get_logger
 log = get_logger()
 
 
+def bottom_half_bounds(
+    viewport_w: int, viewport_h: int
+) -> tuple[int, int, int, int]:
+    """按实际截图像素返回下半屏 bounds (x, y, w, h)。"""
+    w = max(int(viewport_w), 1)
+    h = max(int(viewport_h), 1)
+    y0 = h // 2
+    return (0, y0, w, h - y0)
+
+
+def top_half_bounds(
+    viewport_w: int, viewport_h: int
+) -> tuple[int, int, int, int]:
+    """按实际截图像素返回上半屏 bounds (x, y, w, h)。"""
+    w = max(int(viewport_w), 1)
+    h = max(int(viewport_h), 1)
+    return (0, 0, w, h // 2)
+
+
+# 退出/云服务器确认：画面上可能是「确定」或「同意」
+CONFIRM_TEMPLATES = ("game_popup_confirm.png", "game_logout_confirm.png")
+CONFIRM_THRESHOLD = 0.48  # 云游戏压缩下 0.53 易差一点点失败（曾见 0.513）
+
+
+def click_confirm_dialog(nav, *, wait_after: float = 3.0) -> str | None:
+    """在下半屏点击确认类按钮。
+
+    Returns:
+        点中的模板文件名；都未匹配则返回 None。
+    """
+    if wait_after > 0:
+        time.sleep(wait_after)
+    vw, vh = nav.viewport_size()
+    bounds = bottom_half_bounds(vw, vh)
+    log.info(
+        f"确认弹窗搜索区 viewport={vw}x{vh} bounds={bounds} "
+        f"templates={CONFIRM_TEMPLATES} threshold={CONFIRM_THRESHOLD}"
+    )
+    for tpl in CONFIRM_TEMPLATES:
+        if nav.find_and_click(
+            tpl,
+            timeout=3,
+            bounds=bounds,
+            threshold=CONFIRM_THRESHOLD,
+            max_retries=4,
+        ):
+            log.info(f"已点击确认弹窗: {tpl}")
+            return tpl
+    return None
+
+
+def platform_select_bounds(
+    viewport_w: int, viewport_h: int, platform: str
+) -> tuple[int, int, int, int]:
+    """按实际截图像素计算平台按钮搜索区。
+
+    布局：下半屏；微信左半、QQ 右半。使用真实视口尺寸，避免固定
+    1920×1080 与最大化截图不一致导致搜到错误半区。
+    """
+    w = max(int(viewport_w), 1)
+    h = max(int(viewport_h), 1)
+    y0 = h // 2
+    hh = h - y0
+    half_w = w // 2
+    if platform.startswith("wx"):
+        return (0, y0, half_w, hh)
+    return (half_w, y0, w - half_w, hh)
+
+
 # ---------------------------------------------------------------------------
 # 网页登录（腾讯先锋 gamer.qq.com）
 # ---------------------------------------------------------------------------
@@ -256,12 +325,12 @@ def game_login(
         on_status(f"未知的平台选择: {platform}")
         return False
 
-    # ---- 计算搜索区域（CSS 视口像素） ----
-    # 平台按钮：微信在左半边，QQ 在右半边
-    if platform.startswith("wx"):
-        platform_bounds = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
-    else:
-        platform_bounds = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
+    # ---- 按实际截图像素计算搜索区域（下半屏：微信左 / QQ 右） ----
+    vw, vh = nav.viewport_size()
+    platform_bounds = platform_select_bounds(vw, vh, platform)
+    log.info(
+        f"平台选择搜索区 platform={platform} viewport={vw}x{vh} bounds={platform_bounds}"
+    )
 
     # ---- 1. 点击平台登录按钮 ----
     on_status(f"选择登录平台: {platform_name}...")
@@ -275,7 +344,7 @@ def game_login(
 
     # ---- 1a. 检查「登录其他账号」弹窗 ----
     time.sleep(2)
-    login_other_bounds = (0, BROWSER_HEIGHT // 2, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
+    login_other_bounds = bottom_half_bounds(vw, vh)
     if nav.find_and_click("game_login_other.png", timeout=3, bounds=login_other_bounds):
         on_status("已点击「登录其他账号」")
         time.sleep(2)

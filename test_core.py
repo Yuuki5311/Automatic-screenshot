@@ -235,35 +235,52 @@ class TestPopupMonitor:
 # ========== 平台选择 bounds 计算测试 ==========
 
 class TestPlatformBounds:
-    """测试 game_login 中平台选择的搜索区域计算（CSS 视口像素）。"""
+    """测试平台选择搜索区：按真实视口、下半屏、左右分栏。"""
 
-    def test_wx_platform_left_half(self):
-        """微信平台应搜索左半边。"""
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT
+    def test_wx_platform_bottom_left_uses_actual_viewport(self):
+        from login import platform_select_bounds
 
-        platform = "wx_android"
+        # 模拟最大化后大于 1920×1080 的截图
+        bounds = platform_select_bounds(2560, 1440, "wx_android")
+        assert bounds == (0, 720, 1280, 720)
 
-        if platform.startswith("wx"):
-            bounds = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
-        else:
-            bounds = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
+    def test_qq_platform_bottom_right_uses_actual_viewport(self):
+        from login import platform_select_bounds
 
-        expected = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
-        assert bounds == expected, f"微信 bounds 应为左半边，实际 {bounds}"
+        bounds = platform_select_bounds(2560, 1440, "qq_android")
+        assert bounds == (1280, 720, 1280, 720)
 
-    def test_qq_platform_right_half(self):
-        """QQ 平台应搜索右半边。"""
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT
+    def test_odd_width_covers_full_right_half(self):
+        from login import platform_select_bounds
 
-        platform = "qq_android"
+        bounds = platform_select_bounds(1921, 1080, "qq_ios")
+        assert bounds[0] == 960
+        assert bounds[0] + bounds[2] == 1921
 
-        if platform.startswith("wx"):
-            bounds = (0, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
-        else:
-            bounds = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
+    def test_bottom_half_bounds_uses_actual_viewport(self):
+        from login import bottom_half_bounds
 
-        expected = (BROWSER_WIDTH // 2, 0, BROWSER_WIDTH // 2, BROWSER_HEIGHT)
-        assert bounds == expected, f"QQ bounds 应为右半边，实际 {bounds}"
+        assert bottom_half_bounds(2560, 1440) == (0, 720, 2560, 720)
+
+    def test_top_half_bounds_uses_actual_viewport(self):
+        from login import top_half_bounds
+
+        assert top_half_bounds(2560, 1440) == (0, 0, 2560, 720)
+
+    @patch("login.time.sleep", return_value=None)
+    def test_click_confirm_dialog_tries_both_templates(self, _mock_sleep):
+        from login import click_confirm_dialog
+
+        nav = Mock()
+        nav.viewport_size.return_value = (2560, 1440)
+        nav.find_and_click.side_effect = [False, True]
+
+        assert click_confirm_dialog(nav, wait_after=0) == "game_logout_confirm.png"
+        assert nav.find_and_click.call_count == 2
+        first = nav.find_and_click.call_args_list[0]
+        assert first.args[0] == "game_popup_confirm.png"
+        assert first.kwargs["threshold"] == 0.48
+        assert first.kwargs["bounds"] == (0, 720, 2560, 720)
 
 
 # ========== PopupMonitor 安全白名单测试 ==========
@@ -272,38 +289,39 @@ class TestPopupSafety:
     """验证同步与异步通用扫描只操作安全的关闭按钮。"""
 
     def test_scan_checks_exact_close_allowlist_with_shared_bounds(self):
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT
         from popup_monitor import PopupMonitor
 
         nav = Mock()
+        nav.viewport_size.return_value = (2560, 1440)
         nav.wait_for_template.side_effect = [False, False]
         monitor = PopupMonitor(navigator=nav)
 
         assert monitor._do_scan() is False
 
-        top_bounds = (0, 0, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
+        top_bounds = (0, 0, 2560, 720)
         assert [
             call.args[0] for call in nav.wait_for_template.call_args_list
         ] == ["popup_close.png", "popup_close_small.png"]
         for call in nav.wait_for_template.call_args_list:
             assert call.kwargs["threshold"] == 0.85
             assert call.kwargs["bounds"] == top_bounds
+        nav.viewport_size.assert_called()
 
     @patch("popup_monitor.time.sleep", return_value=None)
     def test_scan_uses_close_only_allowlist_and_disables_fallback(
         self, _mock_sleep
     ):
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT
         from popup_monitor import PopupMonitor
 
         nav = Mock()
+        nav.viewport_size.return_value = (2560, 1440)
         nav.wait_for_template.side_effect = [True, True, False]
         nav.find_and_click.return_value = True
         monitor = PopupMonitor(navigator=nav)
 
         assert monitor._do_scan() is True
 
-        top_bounds = (0, 0, BROWSER_WIDTH, BROWSER_HEIGHT // 2)
+        top_bounds = (0, 0, 2560, 720)
         nav.find_and_click.assert_called_once_with(
             "popup_close.png",
             timeout=2,
