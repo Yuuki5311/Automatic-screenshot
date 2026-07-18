@@ -34,6 +34,7 @@ jobs:
             --hidden-import tkinter.ttk `
             --hidden-import cv2 `
             --hidden-import cv2._core `
+            --collect-all cv2 `
             --hidden-import numpy `
             --hidden-import numpy._core `
             --hidden-import PIL `
@@ -44,6 +45,7 @@ jobs:
             --hidden-import selenium.webdriver.chrome.options `
             --hidden-import selenium.webdriver.edge.service `
             --hidden-import selenium.webdriver.edge.options `
+            --collect-all selenium `
             --collect-binaries selenium `
             --hidden-import webdriver_manager `
             --hidden-import webdriver_manager.chrome `

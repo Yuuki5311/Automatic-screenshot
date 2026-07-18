@@ -346,13 +346,6 @@ class App(tk.Tk):
 
     def _run_workflow(self):
         """后台线程：执行完整的登录 → 截图工作流。"""
-        from browser import create_browser
-        from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, CLICK_INTERVAL, TEMPLATES_DIR, SCREENSHOTS_DIR, SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX, resource_path, writable_path
-        from login import web_login, game_login, click_confirm_dialog
-        from game_launcher import launch_game
-        from navigator import Navigator
-        from screenshotter import Screenshotter
-        from popup_monitor import PopupMonitor
         from logger import get_logger
         import os
         import json
@@ -364,6 +357,18 @@ class App(tk.Tk):
         monitor = None
 
         try:
+            _log.info("工作流线程启动")
+            self._send({"type": "log", "text": "正在加载组件..."})
+            # 依赖应已在 main 主线程预加载；此处再导入以便开发模式懒加载
+            from browser import create_browser
+            from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, CLICK_INTERVAL, TEMPLATES_DIR, SCREENSHOTS_DIR, SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX, resource_path, writable_path
+            from login import web_login, game_login, click_confirm_dialog
+            from game_launcher import launch_game
+            from navigator import Navigator
+            from screenshotter import Screenshotter
+            from popup_monitor import PopupMonitor
+            _log.info("工作流模块就绪")
+
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
             if not self._platform_logged_in:
                 if self._stop_event.is_set():
