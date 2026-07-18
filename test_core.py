@@ -561,6 +561,34 @@ class TestScreenshotTasks:
                 assert template.endswith(".png"), f"{name} 模板 {template} 应为 .png"
 
 
+# ========== 二维码裁切辅助测试 ==========
+
+class TestCropQrFromBgr:
+    """测试 login.crop_qr_from_bgr：检测并裁切二维码区域。"""
+
+    def test_blank_image_returns_none(self):
+        from login import crop_qr_from_bgr
+
+        blank = np.zeros((200, 200, 3), dtype=np.uint8)
+        assert crop_qr_from_bgr(blank) is None
+
+    def test_synthetic_qr_returns_pil_image(self):
+        from login import crop_qr_from_bgr
+        from PIL import Image
+
+        encoder = cv2.QRCodeEncoder.create()
+        qr = encoder.encode("https://example.com/login-test")
+        qr_big = cv2.resize(qr, (200, 200), interpolation=cv2.INTER_NEAREST)
+        canvas = np.ones((500, 500), dtype=np.uint8) * 255
+        canvas[150:350, 150:350] = qr_big
+        frame_bgr = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
+
+        result = crop_qr_from_bgr(frame_bgr)
+        assert result is not None
+        assert isinstance(result, Image.Image)
+        assert result.size[0] > 0 and result.size[1] > 0
+
+
 if __name__ == "__main__":
     # 简易测试运行器
     import traceback
@@ -573,6 +601,7 @@ if __name__ == "__main__":
         TestNavigatorThreshold(),
         TestSwitchToNewTab(),
         TestScreenshotTasks(),
+        TestCropQrFromBgr(),
     ]
 
     passed = 0

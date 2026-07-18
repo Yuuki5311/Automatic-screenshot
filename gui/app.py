@@ -360,11 +360,20 @@ class App(tk.Tk):
                 _log.info(f"[阶段1] 登录方式: {login_type}")
 
                 def on_qr(image=None):
-                    self._send({
-                        "type": "scan_wait",
-                        "title": f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录",
-                        "text": "⏳ 请在打开的浏览器窗口中扫码...",
-                    })
+                    title = f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录"
+                    if image is not None:
+                        self._send({
+                            "type": "qr",
+                            "image": image,
+                            "title": title,
+                            "status": "⏳ 请扫描下方二维码（也可在浏览器窗口扫）...",
+                        })
+                    else:
+                        self._send({
+                            "type": "scan_wait",
+                            "title": title,
+                            "text": "⏳ 未截到二维码，请直接在浏览器窗口扫码...",
+                        })
 
                 def on_status(text):
                     if "成功" in text:
@@ -522,11 +531,20 @@ class App(tk.Tk):
             self._send({"type": "log", "text": f"已选择游戏登录平台: {platform_display}"})
 
             def on_game_qr(image=None):
-                self._send({
-                    "type": "scan_wait",
-                    "title": f"游戏 {platform_display} 登录",
-                    "text": "⏳ 请在游戏窗口中扫码...",
-                })
+                title = f"游戏 {platform_display} 登录"
+                if image is not None:
+                    self._send({
+                        "type": "qr",
+                        "image": image,
+                        "title": title,
+                        "status": "⏳ 请扫描下方二维码（也可在游戏窗口扫）...",
+                    })
+                else:
+                    self._send({
+                        "type": "scan_wait",
+                        "title": title,
+                        "text": "⏳ 未截到二维码，请直接在游戏窗口扫码...",
+                    })
 
             def on_game_status(text):
                 if "成功" in text:

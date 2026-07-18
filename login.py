@@ -13,6 +13,7 @@ from typing import Callable
 
 import cv2
 import numpy as np
+from PIL import Image
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -43,6 +44,40 @@ def top_half_bounds(
     w = max(int(viewport_w), 1)
     h = max(int(viewport_h), 1)
     return (0, 0, w, h // 2)
+
+
+def crop_qr_from_bgr(frame_bgr: np.ndarray) -> Image.Image | None:
+    """从 BGR 截图中检测二维码并裁切为 PIL Image。
+
+    四周加约 20% 边距；检测失败返回 None。
+    """
+    if frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
+        return None
+    try:
+        detector = cv2.QRCodeDetector()
+        _data, bbox, _ = detector.detectAndDecode(frame_bgr)
+        if bbox is None or len(bbox) == 0:
+            return None
+        pts = np.array(bbox, dtype=np.float32).reshape(-1, 2)
+        x_min, y_min = pts.min(axis=0)
+        x_max, y_max = pts.max(axis=0)
+        w = max(float(x_max - x_min), 1.0)
+        h = max(float(y_max - y_min), 1.0)
+        pad_x = w * 0.2
+        pad_y = h * 0.2
+        h_img, w_img = frame_bgr.shape[:2]
+        x0 = max(int(x_min - pad_x), 0)
+        y0 = max(int(y_min - pad_y), 0)
+        x1 = min(int(x_max + pad_x), w_img)
+        y1 = min(int(y_max + pad_y), h_img)
+        if x1 <= x0 or y1 <= y0:
+            return None
+        crop_bgr = frame_bgr[y0:y1, x0:x1]
+        crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(crop_rgb)
+    except Exception:
+        log.debug("crop_qr_from_bgr 失败", exc_info=True)
+        return None
 
 
 # 退出/云服务器确认：画面上可能是「确定」或「同意」
@@ -103,7 +138,7 @@ def platform_select_bounds(
 def web_login(
     driver: WebDriver,
     login_type: str,
-    on_qr: Callable[[], None] | None = None,
+    on_qr: Callable[..., None] | None = None,
     on_status: Callable[[str], None] | None = None,
     timeout: int = 300,
 ) -> bool:
@@ -120,7 +155,7 @@ def web_login(
     Args:
         driver: Selenium WebDriver 实例。
         login_type: 'qq' 或 'wechat'。
-        on_qr: 可选，通知 GUI 等待扫码的回调。
+        on_qr: 可选，收到二维码图时回调 on_qr(image)，失败时可 on_qr()。
         on_status: 状态更新回调，传入文字描述。
         timeout: 扫码等待超时（秒），默认 5 分钟。
 
@@ -163,7 +198,7 @@ def web_login(
         driver.save_screenshot("debug_login.png")
         return False
 
-    # ---- 4. 切换到 iframe，提示用户扫码 ----
+    # ---- 4. 切换到 iframe，准备扫码 ----
     try:
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         if not iframes:
@@ -187,13 +222,33 @@ def web_login(
         driver.save_screenshot("debug_qr.png")
         return False
 
-    # 通知 GUI 等待扫码（不截取二维码）
-    if on_qr:
-        on_qr()
+    def _capture_and_push_qr() -> None:
+        if not on_qr:
+            return
+        try:
+            driver.switch_to.default_content()
+            png = driver.get_screenshot_as_png()
+            frame_bgr = cv2.imdecode(
+                np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
+            )
+            image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
+            if image is not None:
+                on_qr(image)
+            else:
+                on_qr()
+        except Exception:
+            log.debug("web_login 截取二维码失败", exc_info=True)
+            try:
+                on_qr()
+            except Exception:
+                pass
+
+    _capture_and_push_qr()
     on_status("请使用手机扫描二维码登录...")
 
     # ---- 5. 轮询等待登录成功 ----
     start = time.time()
+    last_qr_push = time.time()
     while time.time() - start < timeout:
         try:
             # 切回顶层检测页面变化
@@ -267,6 +322,10 @@ def web_login(
         except Exception:
             log.debug(f"登录轮询外层异常，继续尝试", exc_info=True)
 
+        if time.time() - last_qr_push >= 8:
+            _capture_and_push_qr()
+            last_qr_push = time.time()
+
         time.sleep(2)
 
     driver.save_screenshot("debug_login_timeout.png")
@@ -291,7 +350,7 @@ PLATFORM_TEMPLATES = {
 def game_login(
     nav,  # Navigator 实例
     platform: str,
-    on_qr: Callable[[], None] | None = None,
+    on_qr: Callable[..., None] | None = None,
     on_status: Callable[[str], None] | None = None,
     timeout: int = 300,
 ) -> bool:
@@ -299,14 +358,14 @@ def game_login(
 
     流程：
         1. 点击用户选择的平台登录按钮
-        2. 通知 GUI 等待扫码
+        2. 检测并推送登录二维码到 GUI
         3. 轮询检测登录成功
         4. 点击「进入游戏」
 
     Args:
         nav: Navigator 实例。
         platform: 'wx_ios' | 'wx_android' | 'qq_ios' | 'qq_android'
-        on_qr: 可选，通知 GUI 等待扫码的回调。
+        on_qr: 可选，收到二维码图时回调 on_qr(image)。
         on_status: 状态更新回调。
         timeout: 扫码等待超时（秒）。
 
@@ -349,20 +408,16 @@ def game_login(
         on_status("已点击「登录其他账号」")
         time.sleep(2)
 
-    # ---- 3. 通知 GUI 并等待扫码登录 ----
-    if on_qr:
-        on_qr()
+    # ---- 3. 等待扫码登录 ----
     on_status(f"请在游戏窗口中扫描 {platform_name} 登录二维码...")
     time.sleep(3)
 
     start = time.time()
     qr_appeared = False
+    last_qr_push = 0.0
     QR_CODE_TIMEOUT = 15  # 15 秒内必须出现二维码
 
     avatar_detected_at = None  # 头像出现时间（用于快速重试）
-
-    # 重新启用 QRCodeDetector 用于检测二维码是否出现
-    qr_detector = cv2.QRCodeDetector()
 
     while time.time() - start < timeout:
         # ---- 检测登录成功 ----
@@ -388,7 +443,7 @@ def game_login(
             on_status("⚠️ 登录成功但未找到进入游戏按钮，将重试平台选择")
             return False
 
-        # ---- 检测二维码是否出现 ----
+        # ---- 检测 / 刷新二维码 ----
         if not qr_appeared:
             try:
                 png = nav.driver.get_screenshot_as_png()
@@ -396,18 +451,33 @@ def game_login(
                     np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
                 )
                 del png
-                data, bbox, _ = qr_detector.detectAndDecode(frame_bgr)
-                if bbox is not None and len(bbox) > 0:
+                image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
+                if image is not None:
                     qr_appeared = True
+                    if on_qr:
+                        on_qr(image)
+                    last_qr_push = time.time()
                     on_status("✅ 检测到登录二维码")
                 del frame_bgr
             except Exception:
-                log.debug(f"二维码检测异常", exc_info=True)
+                log.debug("二维码检测异常", exc_info=True)
 
             # 15 秒内未出现二维码 → 返回失败，触发重试
             if time.time() - start > QR_CODE_TIMEOUT:
                 on_status("⚠️ 未检测到登录二维码，将重试")
                 return False
+        elif on_qr and time.time() - last_qr_push >= 8:
+            try:
+                png = nav.driver.get_screenshot_as_png()
+                frame_bgr = cv2.imdecode(
+                    np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
+                )
+                image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
+                if image is not None:
+                    on_qr(image)
+                    last_qr_push = time.time()
+            except Exception:
+                log.debug("刷新游戏二维码失败", exc_info=True)
 
         time.sleep(2)
 
