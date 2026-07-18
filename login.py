@@ -165,7 +165,15 @@ def web_login(
     on_status(f"开始{'QQ' if login_type == 'qq' else '微信'}扫码登录...")
 
     # ---- 1. 打开 gamer.qq.com ----
-    driver.get(CLOUD_GAMING_URL)
+    log.info(f"正在打开: {CLOUD_GAMING_URL}")
+    try:
+        driver.set_page_load_timeout(60)
+        driver.get(CLOUD_GAMING_URL)
+    except Exception as e:
+        on_status(f"打开腾讯先锋页面失败（超时或网络异常）: {e}")
+        log.exception("打开 CLOUD_GAMING_URL 失败")
+        return False
+    log.info(f"页面已打开: {driver.current_url}")
     time.sleep(PAGE_LOAD_WAIT * 2)
 
     # ---- 2. 点击登录按钮 ----

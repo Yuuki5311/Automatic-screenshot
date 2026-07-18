@@ -11,12 +11,22 @@
 import platform
 import os
 import subprocess
+import time
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from webdriver_manager.chrome import ChromeDriverManager
+
+from logger import get_logger
+
+log = get_logger()
+
+# 页面加载超时：避免 EXE 下 driver.get 长时间无响应像“卡住”
+PAGE_LOAD_TIMEOUT_SEC = 60
+# 浏览器命令超时（含首次下载 EdgeDriver）
+BROWSER_COMMAND_TIMEOUT_SEC = 120
 
 
 # CDP 注入脚本：在页面加载前执行，隐藏自动化特征
@@ -122,11 +132,26 @@ def _create_chrome(width: int, height: int) -> webdriver.Chrome:
     return driver
 
 
+def _bring_to_front_windows() -> None:
+    """尽量把 Edge 窗口带到前台（自动化窗口常被 GUI 挡住）。"""
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW("Chrome_WidgetWin_1", None)
+        if hwnd:
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        log.debug("前置 Edge 窗口失败", exc_info=True)
+
+
 def _create_edge(width: int, height: int) -> webdriver.Edge:
     """Windows: 创建 Edge 浏览器实例（Chromium 内核，与 Chrome 兼容）。"""
     options = EdgeOptions()
 
     options.add_argument(f"--window-size={width},{height}")
+    options.add_argument("--start-maximized")
     options.add_argument("--force-device-scale-factor=1")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -145,7 +170,25 @@ def _create_edge(width: int, height: int) -> webdriver.Edge:
         "SE_MSEDGEDRIVER_MIRROR_URL",
         "https://msedgedriver.microsoft.com",
     )
-    driver = webdriver.Edge(options=options)
+
+    log.info(
+        "正在启动 Microsoft Edge（首次可能下载驱动，需联网，最多约 "
+        f"{BROWSER_COMMAND_TIMEOUT_SEC}s）..."
+    )
+    t0 = time.time()
+    try:
+        driver = webdriver.Edge(options=options)
+    except Exception as e:
+        raise RuntimeError(
+            "无法启动 Microsoft Edge。"
+            "请确认已安装 Edge、可访问互联网（首次需下载驱动），"
+            "并关闭残留的 msedgedriver 进程后重试。"
+            f" 原始错误: {e}"
+        ) from e
+    log.info(f"Edge 进程已创建 ({time.time() - t0:.1f}s)")
+
+    driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SEC)
+    driver.set_script_timeout(PAGE_LOAD_TIMEOUT_SEC)
 
     # Edge 同样支持 CDP（Chromium 内核）
     driver.execute_cdp_cmd(
@@ -153,8 +196,12 @@ def _create_edge(width: int, height: int) -> webdriver.Edge:
         {"source": PRELOAD_SCRIPT},
     )
 
-    driver.maximize_window()
+    try:
+        driver.maximize_window()
+    except Exception:
+        log.debug("maximize_window 失败，已使用 --start-maximized", exc_info=True)
 
+    _bring_to_front_windows()
     return driver
 
 

@@ -226,9 +226,14 @@ class App(tk.Tk):
         self._log_view.add_log("启动任务...", "info")
         self._exit_btn.config(state="normal")
 
-        # 启动前锁定平台选择
+        # 启动前在主线程锁定选项（避免后台线程读 Tk 变量）
         self._platform_choice = self._platform_var.get()
+        self._selected_login_type = self._login_type.get()
         self._log_view.add_log(f"游戏平台: {self._platform_choice}", "info")
+        self._log_view.add_log(
+            f"腾讯先锋登录: {'QQ' if self._selected_login_type == 'qq' else '微信'}",
+            "info",
+        )
 
         self._worker_thread = threading.Thread(
             target=self._run_workflow, daemon=True
@@ -365,13 +370,27 @@ class App(tk.Tk):
                     return
 
                 _log.info("[阶段1] 开始腾讯先锋登录")
-                self._send({"type": "log", "text": "正在打开浏览器..."})
+                self._send({
+                    "type": "log",
+                    "text": "正在打开 Edge 浏览器（首次需联网下载驱动，可能需 1～2 分钟）...",
+                })
 
-                driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
+                try:
+                    driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
+                except Exception as e:
+                    _log.exception("[阶段1] 打开浏览器失败")
+                    self._send({
+                        "type": "log",
+                        "text": f"❌ 打开浏览器失败: {e}",
+                        "level": "error",
+                    })
+                    self._send({"type": "done", "text": f"❌ 打开浏览器失败:\n{e}"})
+                    return
+
                 self._driver = driver
-
-                login_type = self._login_type.get()
-                _log.info(f"[阶段1] 登录方式: {login_type}")
+                login_type = getattr(self, "_selected_login_type", None) or "qq"
+                _log.info(f"[阶段1] 登录方式: {login_type}，浏览器已就绪")
+                self._send({"type": "log", "text": "✅ 浏览器已打开", "level": "success"})
 
                 def on_qr(image=None):
                     title = f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录"
