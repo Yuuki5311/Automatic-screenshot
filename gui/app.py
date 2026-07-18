@@ -36,6 +36,7 @@ class App(tk.Tk):
         # ---- 状态 ----
         self._platform_logged_in = False  # 腾讯先锋是否已登录
         self._is_rerun = False            # 是否为再跑一轮
+        self._driver = None               # 跨轮次复用的 WebDriver
 
         # ---- 平台选择（首页直接选定） ----
         self._platform_choice = None
@@ -248,9 +249,15 @@ class App(tk.Tk):
         self._platform_var.set(new_platform)
         self._platform_choice = new_platform
 
-        # 登录方式变化 → 需要重新登录腾讯先锋
+        # 登录方式变化 → 需要重新登录腾讯先锋（旧浏览器作废）
         if new_login_type != old_login_type:
             self._platform_logged_in = False
+            if self._driver is not None:
+                try:
+                    self._driver.quit()
+                except Exception:
+                    pass
+                self._driver = None
 
         self._is_rerun = True
         self._on_start()
@@ -260,6 +267,12 @@ class App(tk.Tk):
         self._stop_event.set()
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=3)
+        if self._driver is not None:
+            try:
+                self._driver.quit()
+            except Exception:
+                pass
+            self._driver = None
         self.destroy()
 
     # ------------------------------------------------------------------
@@ -340,7 +353,7 @@ class App(tk.Tk):
         import json
 
         _log = get_logger()
-        driver = None
+        driver = self._driver
         _nav = None
         nav = None
         monitor = None
@@ -355,6 +368,7 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": "正在打开浏览器..."})
 
                 driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
+                self._driver = driver
 
                 login_type = self._login_type.get()
                 _log.info(f"[阶段1] 登录方式: {login_type}")
@@ -468,6 +482,13 @@ class App(tk.Tk):
                 if self._stop_event.is_set():
                     return
 
+                if driver is None:
+                    _log.error("[再跑一轮] 浏览器实例丢失，无法继续")
+                    self._send({"type": "log", "text": "❌ 浏览器已关闭，请重新从待命页启动", "level": "error"})
+                    self._send({"type": "done", "text": "❌ 浏览器实例丢失，请重新启动"})
+                    self._platform_logged_in = False
+                    return
+
                 self._send({"type": "log", "text": "正在退出当前游戏登录...", "level": "info"})
                 _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
                 monitor = PopupMonitor(navigator=_nav)
@@ -509,6 +530,13 @@ class App(tk.Tk):
 
             # ====== 阶段 3: 游戏内登录 + 截图 ======
             if self._stop_event.is_set():
+                return
+
+            if driver is None:
+                _log.error("[阶段3] 浏览器实例不可用")
+                self._send({"type": "log", "text": "❌ 浏览器实例不可用，请重新启动", "level": "error"})
+                self._send({"type": "done", "text": "❌ 浏览器实例不可用"})
+                self._platform_logged_in = False
                 return
 
             # 释放上一个 Navigator 的模板缓存
