@@ -663,7 +663,254 @@ class TestScreenshotTasks:
                 assert template.endswith(".png"), f"{name} 模板 {template} 应为 .png"
 
 
-# ========== 二维码裁切辅助测试 ==========
+# ========== 轻量 FSM：状态分类 ==========
+
+class TestUiClassify:
+    """classify_from_scores 优先级：POPUP > LOGIN > MAIN/ON_PATH > UNKNOWN。"""
+
+    def test_popup_wins_over_avatar(self):
+        from ui_state import UiState, classify_from_scores, POPUP_CLOSE_THRESHOLD
+
+        state, info = classify_from_scores({
+            "popup_close.png": POPUP_CLOSE_THRESHOLD,
+            "avatar.png": 0.99,
+        })
+        assert state == UiState.POPUP
+        assert info["scores"]["popup_close.png"] >= POPUP_CLOSE_THRESHOLD
+
+    def test_login_wins_over_main(self):
+        from ui_state import UiState, classify_from_scores
+
+        # 无头像 + 高置信度平台图 → LOGIN
+        state, _ = classify_from_scores({
+            "game_qq_android.png": 0.90,
+            "avatar.png": 0.40,
+        })
+        assert state == UiState.LOGIN
+
+    def test_login_ignored_when_avatar_visible(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, _ = classify_from_scores({
+            "game_qq_android.png": 0.90,
+            "avatar.png": 0.95,
+        })
+        assert state == UiState.MAIN
+
+    def test_login_mid_score_not_enough(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, _ = classify_from_scores({
+            "game_qq_android.png": 0.65,
+            "avatar.png": 0.40,
+        })
+        assert state == UiState.UNKNOWN
+
+    def test_main_when_avatar_only(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, _ = classify_from_scores({"avatar.png": 0.90})
+        assert state == UiState.MAIN
+
+    def test_on_path_when_path_template_hits(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, _ = classify_from_scores(
+            {"tab_home.png": 0.88, "avatar.png": 0.50},
+            path_templates=["tab_home.png"],
+        )
+        assert state == UiState.ON_PATH
+
+    def test_confirm_ignored_by_default(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, _ = classify_from_scores({
+            "game_popup_confirm.png": 0.99,
+            "avatar.png": 0.90,
+        })
+        assert state == UiState.MAIN
+
+    def test_confirm_when_allowed(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, _ = classify_from_scores(
+            {"game_popup_confirm.png": 0.99},
+            allow_confirm=True,
+        )
+        assert state == UiState.CONFIRM
+
+    def test_unknown_when_all_low(self):
+        from ui_state import UiState, classify_from_scores
+
+        state, info = classify_from_scores({
+            "popup_close.png": 0.40,
+            "avatar.png": 0.40,
+        })
+        assert state == UiState.UNKNOWN
+        assert "scores" in info
+
+    def test_popup_close_bounds_is_top_right(self):
+        from ui_state import popup_close_bounds
+
+        assert popup_close_bounds(2560, 1440) == (1280, 0, 1280, 720)
+
+
+# ========== 轻量 FSM：决策与 Goal ==========
+
+class TestUiDecide:
+    """decide：POPUP 禁止推进主线；MAIN 才允许点击/截图。"""
+
+    def test_popup_action_is_close_not_click(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        assert decide(UiState.POPUP, g) == Action.CLOSE_POPUP
+        assert g.task_index == 0
+        assert g.click_index == 0
+
+    def test_main_need_click(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        assert decide(UiState.MAIN, g) == Action.CLICK_STEP
+
+    def test_main_need_shot_after_clicks(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        g.click_index = 1
+        assert decide(UiState.MAIN, g) == Action.TAKE_SHOT
+
+    def test_on_path_allows_click(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        assert decide(UiState.ON_PATH, g) == Action.CLICK_STEP
+
+    def test_login_triggers_relogin(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        assert decide(UiState.LOGIN, g) == Action.RELOGIN
+
+    def test_unknown_waits_then_recover(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+        import time
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        g.unknown_since = time.time()
+        assert decide(UiState.UNKNOWN, g) == Action.WAIT
+        g.unknown_since = time.time() - 60
+        assert decide(UiState.UNKNOWN, g) == Action.RECOVER
+
+    def test_finished_when_all_tasks_done(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("主页", [("tab_home.png", "d")], 0)])
+        g.task_index = 1
+        assert decide(UiState.MAIN, g) == Action.FINISHED
+
+    def test_go_back_after_shot(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("页", [("x.png", "d")], 2)])
+        g.click_index = 1
+        g.mark_shot_done()
+        assert decide(UiState.MAIN, g) == Action.GO_BACK
+
+    def test_unknown_still_takes_shot_after_clicks(self):
+        """进入灵宝等内容页后无头像，UNKNOWN 也必须能截图。"""
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("万象图鉴-灵宝", [("lingbao.png", "点击灵宝")], 1)])
+        g.click_index = 1  # 点击已完成
+        assert decide(UiState.UNKNOWN, g) == Action.TAKE_SHOT
+
+    def test_unknown_still_goes_back_after_shot(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("万象图鉴-灵宝", [("lingbao.png", "d")], 1)])
+        g.click_index = 1
+        g.mark_shot_done()
+        assert decide(UiState.UNKNOWN, g) == Action.GO_BACK
+
+    def test_popup_still_blocks_shot(self):
+        from ui_state import UiState
+        from ui_loop import Action, decide, Goal
+
+        g = Goal([("万象图鉴-灵宝", [("lingbao.png", "d")], 1)])
+        g.click_index = 1
+        assert decide(UiState.POPUP, g) == Action.CLOSE_POPUP
+
+
+class TestUiLoopRun:
+    """UiLoop：有弹窗时先关再点，不硬推进主线。"""
+
+    def test_closes_popup_before_click(self):
+        from ui_state import UiState
+        from ui_loop import UiLoop, Action
+
+        states = iter([UiState.POPUP, UiState.MAIN, UiState.MAIN, UiState.MAIN])
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False):
+            try:
+                s = next(states)
+            except StopIteration:
+                s = UiState.MAIN
+            return s, {"scores": {}}
+
+        nav = Mock()
+        nav.viewport_size.return_value = (1920, 1080)
+        nav.find_and_click.return_value = True
+        nav.wait_for_template.return_value = True
+        shot = Mock()
+        shot.take.return_value = "x.png"
+
+        actions = []
+
+        loop = UiLoop(
+            nav=nav,
+            shot=shot,
+            tasks=[("主页", [("tab_home.png", "点击主页")], 0)],
+            tick_s=0,
+            classify_fn=fake_classify,
+        )
+        # speed up sleeps
+        with patch("ui_loop.time.sleep", return_value=None), \
+             patch("ui_loop.PAGE_LOAD_WAIT", 0), \
+             patch("ui_loop.CLICK_INTERVAL", 0), \
+             patch("ui_loop.random.uniform", return_value=0):
+            # wrap _close_popup / _do_click to record order
+            orig_close = loop._close_popup
+            orig_click = loop._do_click_step
+
+            def close_wrap():
+                actions.append("close")
+                return orig_close()
+
+            def click_wrap():
+                actions.append("click")
+                return orig_click()
+
+            loop._close_popup = close_wrap
+            loop._do_click_step = click_wrap
+            n = loop.run()
+
+        assert n == 1
+        assert actions[0] == "close"
+        assert "click" in actions
+        assert actions.index("close") < actions.index("click")
+        shot.take.assert_called_with("主页")
 
 class TestCropQrFromBgr:
     """测试 login.crop_qr_from_bgr：检测并裁切二维码区域。"""

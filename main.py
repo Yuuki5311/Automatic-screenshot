@@ -32,6 +32,8 @@ def _preload_runtime():
     import game_launcher  # noqa: F401
     import screenshotter  # noqa: F401
     import popup_monitor  # noqa: F401
+    import ui_state  # noqa: F401
+    import ui_loop  # noqa: F401
     log.info("运行时依赖预加载完成")
 
 

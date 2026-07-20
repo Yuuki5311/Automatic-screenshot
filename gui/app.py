@@ -8,7 +8,6 @@ from tkinter import ttk
 import threading
 import queue
 import time
-import random
 
 from gui.widgets.qr_display import QRDisplay
 from gui.widgets.log_view import LogView
@@ -361,13 +360,13 @@ class App(tk.Tk):
             self._send({"type": "log", "text": "正在加载组件..."})
             # 依赖应已在 main 主线程预加载；此处再导入以便开发模式懒加载
             from browser import create_browser
-            from config import BROWSER_WIDTH, BROWSER_HEIGHT, PAGE_LOAD_WAIT, CLICK_INTERVAL, TEMPLATES_DIR, SCREENSHOTS_DIR, SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX, resource_path, writable_path
+            from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path, writable_path
             from login import web_login, game_login, click_confirm_dialog
             from game_launcher import launch_game
             from navigator import Navigator
             from screenshotter import Screenshotter
             from popup_monitor import PopupMonitor
-            from screenshot_click import parse_click_item, effect_verify_template
+            from ui_loop import UiLoop
             _log.info("工作流模块就绪")
 
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -650,15 +649,8 @@ class App(tk.Tk):
                 self._send({"type": "done", "text": "❌ 未进入游戏主界面"})
                 return
 
-            # ====== 阶段 4: 截图 ======
-            # 弹窗已在验证前清理；启动异步监控，截图全程后台扫描
-            monitor.start()
-            self._send({"type": "log", "text": "异步弹窗监控已启动"})
-            _log.info("阶段 4 异步弹窗监控已启动")
-
-            avatar_bounds = None
-            nobility_bounds = None
-
+            # ====== 阶段 4: 感知环截图（弹窗优先，不再异步 PopupMonitor） ======
+            # 设计选项 A：环内同步处理弹窗，避免与主线程抢点击
             account = self._account_var.get().strip()
             if not account:
                 account = f"unknown_{time.strftime('%H%M%S')}"
@@ -668,10 +660,8 @@ class App(tk.Tk):
             )
 
             vw, vh = nav.viewport_size()
-            avatar_bounds = (0, 0, int(vw * 0.4), int(vh * 0.5))
             nobility_bounds = (0, 0, vw, int(vh * 0.5))
 
-            # 仅主页头像 / 小兵使用显式坐标点击（其余按钮不做 calibrated_coords 兜底）
             _coords = {}
             try:
                 with open(resource_path("calibrated_coords.json"), "r") as f:
@@ -682,8 +672,6 @@ class App(tk.Tk):
             _minion_xy = tuple(_coords.get("minion", [1377, 366]))
             _log.info(f"坐标点击仅保留: avatar={_avatar_xy}, minion={_minion_xy}")
 
-            # 截图任务（和 main.py 一致）
-            # __coords__ 格式: ("__coords__", 描述, (x, y), 锚点模板)
             screenshot_tasks = [
                 ("主页", [
                     ("__coords__", "点击左上角头像", _avatar_xy, "game_main.png"),
@@ -752,252 +740,50 @@ class App(tk.Tk):
             ]
 
             total = len(screenshot_tasks)
-            success = 0
 
             def _do_recover():
                 """尝试从游戏重启中恢复。返回 True 表示恢复成功。"""
                 self._send({"type": "log", "text": "等待游戏恢复（最多 60s）...", "level": "warn"})
-                monitor.pause()
-
                 start = time.time()
                 game_templates = [
                     "game_wx_ios.png", "game_wx_android.png",
                     "game_qq_ios.png", "game_qq_android.png",
                 ]
-
                 while time.time() - start < 60:
                     if self._stop_event.is_set():
-                        monitor.resume()
                         return False
-
-                    # 检测是否已在主界面
                     if nav.wait_for_template("avatar.png", timeout=2):
-                        monitor.resume()
                         self._send({"type": "log", "text": "检测到游戏主界面，无需重新登录", "level": "info"})
                         return True
-
-                    # 检测是否在登录界面
                     for tpl in game_templates:
                         if nav.wait_for_template(tpl, timeout=1, threshold=0.6):
-                            self._send({"type": "log", "text": f"检测到登录界面，重新登录...", "level": "info"})
-                            if game_login(nav, platform, on_game_qr, on_game_status):
-                                monitor.resume()
-                                return True
-                            else:
-                                monitor.resume()
-                                self._send({"type": "log", "text": "游戏登录失败", "level": "error"})
-                                return False
-
+                            self._send({"type": "log", "text": "检测到登录界面，重新登录...", "level": "info"})
+                            return bool(game_login(nav, platform, on_game_qr, on_game_status))
                     time.sleep(2)
-
-                monitor.resume()
                 self._send({"type": "log", "text": "等待游戏恢复超时", "level": "error"})
                 return False
 
-            restart_loop = True
-            while restart_loop:
-                restart_loop = False
-                consecutive_failures = 0
-                success = 0
+            def _on_log(text, level="info"):
+                self._send({"type": "log", "text": text, "level": level})
 
-                for idx, (name, clicks, back_count) in enumerate(screenshot_tasks, 1):
-                    if self._stop_event.is_set():
-                        return
+            def _on_progress(cur, tot):
+                self._send({"type": "progress", "current": cur, "total": tot})
 
-                    self._send({"type": "log", "text": f"[{idx}/{total}] {name}"})
-                    self._send({"type": "progress", "current": idx - 1, "total": total})
+            self._send({"type": "log", "text": "启动感知环截图（弹窗优先）"})
+            _log.info("阶段 4 感知环启动")
+            success = UiLoop(
+                nav=nav,
+                shot=shot,
+                tasks=screenshot_tasks,
+                stop_event=self._stop_event,
+                on_log=_on_log,
+                on_progress=_on_progress,
+                recover=_do_recover,
+                relogin=lambda: game_login(nav, platform, on_game_qr, on_game_status),
+            ).run()
 
-                    # 异步监控全程在线，不再由主线程同步关闭弹窗
-
-                    all_ok = True
-                    last_step = None  # (verify_template, rollback_action)
-                    rollback_count = 0  # 防止同一节点反复回退
-                    CLICK_EFFECT_RETRIES = 2
-                    EFFECT_VERIFY_TIMEOUT = 5
-
-                    for step_i, item in enumerate(clicks):
-                        parsed = parse_click_item(item)
-                        template = parsed["template"]
-                        desc = parsed["desc"]
-                        bounds = parsed["bounds"]
-                        anchor = parsed["anchor"]
-                        next_item = (
-                            clicks[step_i + 1] if step_i + 1 < len(clicks) else None
-                        )
-                        verify_tpl = effect_verify_template(next_item)
-
-                        step_done = False
-                        match_failed = False
-
-                        for attempt in range(1, CLICK_EFFECT_RETRIES + 2):
-                            # B: 若异步正在关弹窗/冷静，先等其结束；再清弹窗并暂停监控后点击
-                            if monitor is not None:
-                                monitor.wait_until_idle()
-                                monitor.wait_until_clear(3)
-                                monitor.pause()
-
-                            clicked = False
-                            try:
-                                if template == "__coords__":
-                                    x, y = bounds
-                                    nav.click_css(x, y)
-                                    self._send({
-                                        "type": "log",
-                                        "text": f"  🖱 坐标点击 ({x}, {y})",
-                                    })
-                                    _log.info(f"坐标点击 ({x}, {y})")
-                                    time.sleep(CLICK_INTERVAL)
-                                    clicked = True
-                                else:
-                                    clicked = bool(
-                                        nav.find_and_click(template, bounds=bounds)
-                                    )
-                            finally:
-                                if monitor is not None:
-                                    monitor.resume()
-
-                            if not clicked:
-                                match_failed = True
-                                break
-
-                            # A: 有下一步模板则验证点击是否生效
-                            if verify_tpl is None:
-                                step_done = True
-                                break
-
-                            if nav.wait_for_template(
-                                verify_tpl, timeout=EFFECT_VERIFY_TIMEOUT
-                            ):
-                                step_done = True
-                                break
-
-                            self._send({
-                                "type": "log",
-                                "text": (
-                                    f"  ⚠ 点击后未出现 {verify_tpl}，"
-                                    f"可能被弹窗挡住，重试 ({attempt}/{CLICK_EFFECT_RETRIES + 1})"
-                                ),
-                                "level": "warn",
-                            })
-                            if monitor is not None:
-                                monitor.close_all_popups()
-
-                        if step_done:
-                            consecutive_failures = 0
-                            if template == "__coords__":
-                                x, y = bounds
-                                last_step = (
-                                    anchor,
-                                    lambda _x=x, _y=y: nav.click_css(_x, _y),
-                                )
-                            else:
-                                _t = template
-                                _b = bounds
-                                last_step = (
-                                    _t,
-                                    lambda _t=_t, _b=_b: nav.find_and_click(
-                                        _t, bounds=_b
-                                    ),
-                                )
-                            continue
-
-                        # 匹配失败，或多次点击后仍无生效
-                        consecutive_failures += 1
-                        all_ok = False
-                        if match_failed:
-                            self._send({
-                                "type": "log",
-                                "text": f"  ⚠ 找不到 {template}",
-                                "level": "warn",
-                            })
-                        else:
-                            self._send({
-                                "type": "log",
-                                "text": f"  ⚠ 点击 {desc} 未生效（被弹窗打断？）",
-                                "level": "warn",
-                            })
-
-                        # 有上一步锚点 → 立即检查是否页面还在，在则回退重试
-                        if last_step is not None and rollback_count == 0:
-                            verify_template, rollback = last_step
-                            if nav.wait_for_template(verify_template, timeout=2):
-                                self._send({
-                                    "type": "log",
-                                    "text": f"  ↩ 回退：{verify_template} 可见，重试上一步",
-                                    "level": "warn",
-                                })
-                                if monitor is not None:
-                                    monitor.pause()
-                                try:
-                                    rollback()
-                                    time.sleep(CLICK_INTERVAL)
-                                finally:
-                                    if monitor is not None:
-                                        monitor.resume()
-                                consecutive_failures = 0
-                                rollback_count += 1
-                                all_ok = True
-                                continue
-
-                        # 连续失败 ≥2 且主界面头像消失 → 游戏可能崩溃
-                        if consecutive_failures >= 2 and not nav.wait_for_template(
-                            "avatar.png", timeout=2
-                        ):
-                            self._send({
-                                "type": "log",
-                                "text": "⚠️ 游戏可能已重启，尝试恢复...",
-                                "level": "warn",
-                            })
-                            if _do_recover():
-                                self._send({
-                                    "type": "log",
-                                    "text": "✅ 游戏已恢复，重新开始截图",
-                                    "level": "success",
-                                })
-                                restart_loop = True
-                            else:
-                                self._send({
-                                    "type": "log",
-                                    "text": "❌ 游戏恢复失败",
-                                    "level": "error",
-                                })
-                        break
-
-                    if restart_loop:
-                        break
-
-                    if all_ok:
-                        if monitor is not None:
-                            monitor.wait_until_idle()
-                            monitor.wait_until_clear(3)
-                        time.sleep(PAGE_LOAD_WAIT)
-                        shot.take(name)
-                        success += 1
-                        self._send({"type": "log", "text": f"  已截图: {name}", "level": "success"})
-
-                        for _ in range(back_count):
-                            if monitor is not None:
-                                monitor.wait_until_idle()
-                                monitor.pause()
-                            try:
-                                nav.find_and_click("back_arrow.png", timeout=3)
-                            finally:
-                                if monitor is not None:
-                                    monitor.resume()
-                            time.sleep(3)
-                            if monitor is not None:
-                                monitor.wait_until_idle()
-
-                        # 异步监控在间隔期间自动处理弹窗
-
-                        delay = random.uniform(SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX)
-                        self._send({"type": "log", "text": f"  等待 {delay:.1f}s...", "level": "info"})
-                        time.sleep(delay)
-                    else:
-                        self._send({"type": "log", "text": f"  ❌ 截图失败: {name}", "level": "error"})
-
-                if restart_loop:
-                    continue
+            if self._stop_event.is_set():
+                return
 
             self._send({"type": "progress", "current": total, "total": total})
             self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})
