@@ -18,6 +18,11 @@ class PopupMonitor:
     确保坐标转换与主线程一致。
     """
 
+    CLOSE_TEMPLATES = (
+        ("popup_close.png", "X按钮", 0.85),
+        ("popup_close_small.png", "小弹窗X按钮", 0.85),
+    )
+
     def __init__(self, navigator=None, interval: float = 3.0):
         """
         Args:
@@ -37,58 +42,71 @@ class PopupMonitor:
     # 内部
     # ------------------------------------------------------------------
 
-    def _do_scan(self) -> bool:
-        """执行一次弹窗扫描+关闭（不检查暂停状态，供内部和 close_all_popups 复用）。
+    def _close_button_specs(self) -> list[tuple[str, tuple, str, float]]:
+        """返回 [(template, bounds, label, threshold), ...]。"""
+        from login import top_half_bounds
 
-        一轮内遍历关闭按钮模板，尽可能关闭多个弹窗。
+        vw, vh = self.navigator.viewport_size()
+        top_bounds = top_half_bounds(vw, vh)
+        return [
+            (template, top_bounds, label, threshold)
+            for template, label, threshold in self.CLOSE_TEMPLATES
+        ]
+
+    def _find_close_button(self) -> tuple[str, tuple, float] | None:
+        """查找可见的关闭按钮。
+
+        Returns:
+            (template, bounds, threshold) 或 None。
+        """
+        if self.navigator is None:
+            return None
+        try:
+            for template, bounds, _label, threshold in self._close_button_specs():
+                if self.navigator.wait_for_template(
+                    template, timeout=1, threshold=threshold, bounds=bounds
+                ):
+                    return (template, bounds, threshold)
+        except Exception as e:
+            log.debug(f"查找弹窗关闭按钮异常: {e}")
+        return None
+
+    def _click_one_popup(self) -> bool:
+        """若有关闭按钮则点击一次。
+
+        Returns:
+            bool: 成功点击返回 True；未找到或点击失败返回 False。
         """
         if self.navigator is None:
             return False
         try:
-            from login import top_half_bounds
-
-            vw, vh = self.navigator.viewport_size()
-            top_bounds = top_half_bounds(vw, vh)
-
-            buttons = [
-                ("popup_close.png", top_bounds, "X按钮", 0.85),
-                ("popup_close_small.png", top_bounds, "小弹窗X按钮", 0.85),
-            ]
-
-            closed_this_round = 0
-
-            for template, bounds, label, threshold in buttons:
-                kwargs = {"threshold": threshold, "bounds": bounds}
-                if self.navigator.wait_for_template(template, timeout=1, **kwargs):
-                    time.sleep(0.5)
-                    if not self.navigator.wait_for_template(
-                        template, timeout=0.5, **kwargs
-                    ):
-                        continue
-                    time.sleep(2)
-                    if self.navigator.find_and_click(
-                        template,
-                        timeout=2,
-                        bounds=bounds,
-                        threshold=threshold,
-                        allow_fallback=False,
-                    ):
-                        time.sleep(1)
-                        if not self.navigator.wait_for_template(
-                            template, timeout=1, **kwargs
-                        ):
-                            self._closed_count += 1
-                            closed_this_round += 1
-                            log.info(
-                                f"异步关闭弹窗 #{self._closed_count} ({label})"
-                            )
-                            break
-
-            return closed_this_round > 0
-
+            for template, bounds, label, threshold in self._close_button_specs():
+                if not self.navigator.wait_for_template(
+                    template, timeout=1, threshold=threshold, bounds=bounds
+                ):
+                    continue
+                if self.navigator.find_and_click(
+                    template,
+                    timeout=2,
+                    bounds=bounds,
+                    threshold=threshold,
+                    allow_fallback=False,
+                ):
+                    self._closed_count += 1
+                    log.info(f"关闭弹窗 #{self._closed_count} ({label})")
+                    return True
+                log.warning(f"找到 {template} 但点击失败")
+                return False
         except Exception as e:
-            log.debug(f"弹窗扫描异常: {e}")
+            log.debug(f"弹窗点击异常: {e}")
         return False
+
+    def _do_scan(self) -> bool:
+        """执行一次弹窗扫描+关闭（不检查暂停状态）。
+
+        仅点击一个 X；是否还有新弹窗由调用方在等待后再检查。
+        """
+        return self._click_one_popup()
 
     def _scan_once(self) -> bool:
         """后台线程入口：检查暂停状态后执行扫描。"""
@@ -97,7 +115,7 @@ class PopupMonitor:
         return self._do_scan()
 
     def _loop(self):
-        """后台循环。"""
+        """后台循环：点一次 X 后等待 interval，再检查是否有新弹窗。"""
         while self._running:
             self._scan_once()
             time.sleep(self.interval)
@@ -106,27 +124,32 @@ class PopupMonitor:
     # 公开接口
     # ------------------------------------------------------------------
 
-    def close_all_popups(self, max_rounds: int = 10) -> int:
+    def close_all_popups(self, max_rounds: int = 10, wait_after: float = 3.0) -> int:
         """同步关闭所有可见弹窗。
 
-        循环扫描 → 关闭 → 等待3s → 确认无新弹窗 → 继续执行。
-        绕过暂停检查，直接执行扫描，不与后台线程冲突。
+        流程：点击一次 X → 等待 wait_after 秒 → 检查是否还有新弹窗；
+        若有则继续「关闭 → 等待检查」循环。当前无 X 时也会再等一轮确认。
 
         Args:
-            max_rounds: 最大清理轮次（防止死循环）。
+            max_rounds: 最大点击次数（防止死循环）。
+            wait_after: 每次点击后（或确认前）等待秒数。
 
         Returns:
             int: 关闭的弹窗数量。
         """
         closed = 0
         for _ in range(max_rounds):
-            if not self._do_scan():
-                # 等待 3s 后二次确认，防止弹窗动画延迟出现
-                time.sleep(3)
-                if not self._do_scan():
-                    break
-            closed += 1
-            time.sleep(3)
+            if self._click_one_popup():
+                closed += 1
+                time.sleep(wait_after)
+                continue
+
+            # 当前没有可点的 X：等待后再确认是否出现新弹窗
+            time.sleep(wait_after)
+            if self._find_close_button() is None:
+                break
+            # 等待期间出现了新弹窗，继续下一轮点击
+
         if closed > 0:
             log.info(f"弹窗清理完成，共关闭 {closed} 个")
         return closed
@@ -134,33 +157,16 @@ class PopupMonitor:
     def wait_until_clear(self, seconds: float = 3.0) -> int:
         """同步等待弹窗区域冷静。
 
-        持续扫描弹窗，发现后立即关闭，直到连续 ``seconds`` 秒
-        没有出现新弹窗才返回。在截图工作流中的每个导航步骤前调用，
-        确保弹窗关闭动画和级联弹窗都处理完毕。
+        与 close_all_popups 相同：点 X → 等 seconds → 再查新弹窗，
+        直到连续一轮「无 X + 再等 seconds 仍无 X」。
 
         Args:
-            seconds: 需要的冷静时长（秒）。
+            seconds: 每次点击后 / 确认前的等待时长（秒）。
 
         Returns:
             int: 在此期间关闭的弹窗数量。
         """
-        closed = 0
-        quiet_since = time.time()
-
-        while time.time() - quiet_since < seconds:
-            if self._do_scan():
-                closed += 1
-                quiet_since = time.time()
-            else:
-                time.sleep(1)
-
-        # 冷静期结束后再做最后一次扫描，防止弹窗在最后毫秒出现
-        if self._do_scan():
-            closed += 1
-
-        if closed > 0:
-            log.info(f"冷却等待完成，共关闭 {closed} 个弹窗")
-        return closed
+        return self.close_all_popups(max_rounds=20, wait_after=seconds)
 
     def start(self):
         """启动后台弹窗监控。"""

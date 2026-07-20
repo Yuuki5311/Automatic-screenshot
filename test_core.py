@@ -185,51 +185,73 @@ class TestTemplateCache:
 class TestPopupMonitor:
     """测试弹窗监控的扫描和循环逻辑。"""
 
-    def test_close_all_popups_max_rounds(self):
-        """当 _do_scan 永远返回 True 时，应受 max_rounds 限制。"""
+    @patch("popup_monitor.time.sleep", return_value=None)
+    def test_close_all_popups_max_rounds(self, _mock_sleep):
+        """持续能点到 X 时，应受 max_rounds 限制。"""
         from popup_monitor import PopupMonitor
 
-        # 用 Mock 模拟 navigator
         nav = Mock()
-        nav._scale = 2.0
         monitor = PopupMonitor(navigator=nav)
-
-        # _do_scan 一直返回 True（模拟弹窗持续存在）
-        monitor._do_scan = Mock(return_value=True)
+        monitor._click_one_popup = Mock(return_value=True)
 
         result = monitor.close_all_popups(max_rounds=5)
         assert result == 5, "应返回 5 次关闭"
-        assert monitor._do_scan.call_count == 5, "应调用恰好 5 次"
+        assert monitor._click_one_popup.call_count == 5, "应点击恰好 5 次"
 
-    def test_close_all_popups_no_popups(self):
-        """当 _do_scan 两次都返回 False，应确认干净后退出。"""
+    @patch("popup_monitor.time.sleep", return_value=None)
+    def test_close_all_popups_no_popups(self, _mock_sleep):
+        """当前无 X，再等 3s 确认仍无 X，应退出。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
-        nav._scale = 2.0
         monitor = PopupMonitor(navigator=nav)
-        monitor._do_scan = Mock(return_value=False)
+        monitor._click_one_popup = Mock(return_value=False)
+        monitor._find_close_button = Mock(return_value=None)
 
         result = monitor.close_all_popups(max_rounds=10)
         assert result == 0, "无弹窗应返回 0"
-        # 第一次扫描 + 3s 后验证扫描
-        assert monitor._do_scan.call_count == 2, "应调用两次（扫描+验证）"
+        assert monitor._click_one_popup.call_count == 1
+        assert monitor._find_close_button.call_count == 1
 
-    def test_close_all_popups_stops_after_clean(self):
-        """弹窗关完后应等待 3s 再验证一次，确认干净后停止。"""
+    @patch("popup_monitor.time.sleep", return_value=None)
+    def test_close_all_popups_waits_then_closes_new_popup(self, mock_sleep):
+        """每次点击后等 3s；若再出现 X，继续关闭-等待循环。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
-        nav._scale = 2.0
         monitor = PopupMonitor(navigator=nav)
 
-        # 前 3 次有弹窗，第 4 次无弹窗，第 5 次验证仍无弹窗
-        monitor._do_scan = Mock(side_effect=[True, True, True, False, False])
+        # 点第 1 个 → 等 3s → 再点第 2 个 → 等 3s → 无 X → 等 3s 确认仍无
+        monitor._click_one_popup = Mock(side_effect=[True, True, False])
+        monitor._find_close_button = Mock(return_value=None)
 
         result = monitor.close_all_popups(max_rounds=10)
-        assert result == 3, "应返回 3 次关闭"
-        assert monitor._do_scan.call_count == 5, \
-            "应调用 5 次（3 次 True + 无弹窗 + 验证确认）"
+        assert result == 2, "应关闭 2 个弹窗"
+        assert monitor._click_one_popup.call_count == 3
+        assert monitor._find_close_button.call_count == 1
+        # 两次点击后等待 + 一次无弹窗确认等待
+        assert mock_sleep.call_count >= 3
+        for call in mock_sleep.call_args_list:
+            assert call.args[0] == 3
+
+    @patch("popup_monitor.time.sleep", return_value=None)
+    def test_close_all_popups_retries_when_new_popup_after_wait(self, _mock_sleep):
+        """点击后等待期间无 X，但 3s 后再检查出现新 X，应继续关。"""
+        from popup_monitor import PopupMonitor
+
+        nav = Mock()
+        monitor = PopupMonitor(navigator=nav)
+
+        # 第 1 次点到；第 2 次当时点不到；确认时发现新 X；再点掉；再确认干净
+        monitor._click_one_popup = Mock(side_effect=[True, False, True, False])
+        monitor._find_close_button = Mock(
+            side_effect=[("popup_close.png", (0, 0, 1, 1), 0.85), None]
+        )
+
+        result = monitor.close_all_popups(max_rounds=10)
+        assert result == 2
+        assert monitor._click_one_popup.call_count == 4
+        assert monitor._find_close_button.call_count == 2
 
 
 # ========== 平台选择 bounds 计算测试 ==========
@@ -315,7 +337,7 @@ class TestPopupSafety:
 
         nav = Mock()
         nav.viewport_size.return_value = (2560, 1440)
-        nav.wait_for_template.side_effect = [True, True, False]
+        nav.wait_for_template.side_effect = [True]
         nav.find_and_click.return_value = True
         monitor = PopupMonitor(navigator=nav)
 
@@ -344,6 +366,7 @@ class TestPopupSafety:
         from popup_monitor import PopupMonitor
 
         nav = Mock()
+        nav.viewport_size.return_value = (2560, 1440)
         nav.wait_for_template.return_value = True
         nav.find_and_click.return_value = False
         monitor = PopupMonitor(navigator=nav)
