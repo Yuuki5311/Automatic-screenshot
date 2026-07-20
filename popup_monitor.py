@@ -19,9 +19,12 @@ class PopupMonitor:
     确保坐标转换与主线程一致。
     """
 
+    # 云游戏视频流压缩后，0.85 易在弹窗仍可见时漏检（日志曾出现成功时刚好 0.85）。
+    CLOSE_THRESHOLD = 0.78
+
     CLOSE_TEMPLATES = (
-        ("popup_close.png", "X按钮", 0.85),
-        ("popup_close_small.png", "小弹窗X按钮", 0.85),
+        ("popup_close.png", "X按钮"),
+        ("popup_close_small.png", "小弹窗X按钮"),
     )
 
     def __init__(self, navigator=None, interval: float = 3.0):
@@ -47,15 +50,20 @@ class PopupMonitor:
     # 内部
     # ------------------------------------------------------------------
 
+    def _close_search_bounds(self) -> tuple[int, int, int, int]:
+        """弹窗关闭按钮搜索区：右上半屏 (x, y, w, h)。"""
+        vw, vh = self.navigator.viewport_size()
+        w = max(int(vw), 1)
+        h = max(int(vh), 1)
+        x0 = w // 2
+        return (x0, 0, w - x0, h // 2)
+
     def _close_button_specs(self) -> list[tuple[str, tuple, str, float]]:
         """返回 [(template, bounds, label, threshold), ...]。"""
-        from login import top_half_bounds
-
-        vw, vh = self.navigator.viewport_size()
-        top_bounds = top_half_bounds(vw, vh)
+        bounds = self._close_search_bounds()
         return [
-            (template, top_bounds, label, threshold)
-            for template, label, threshold in self.CLOSE_TEMPLATES
+            (template, bounds, label, self.CLOSE_THRESHOLD)
+            for template, label in self.CLOSE_TEMPLATES
         ]
 
     def _find_close_button(self) -> tuple[str, tuple, float] | None:

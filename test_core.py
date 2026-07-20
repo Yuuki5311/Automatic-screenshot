@@ -352,13 +352,13 @@ class TestPopupSafety:
 
         assert monitor._do_scan() is False
 
-        top_bounds = (0, 0, 2560, 720)
+        close_bounds = (1280, 0, 1280, 720)  # 右上半屏
         assert [
             call.args[0] for call in nav.wait_for_template.call_args_list
         ] == ["popup_close.png", "popup_close_small.png"]
         for call in nav.wait_for_template.call_args_list:
-            assert call.kwargs["threshold"] == 0.85
-            assert call.kwargs["bounds"] == top_bounds
+            assert call.kwargs["threshold"] == 0.78
+            assert call.kwargs["bounds"] == close_bounds
         nav.viewport_size.assert_called()
 
     @patch("popup_monitor.time.sleep", return_value=None)
@@ -375,12 +375,12 @@ class TestPopupSafety:
 
         assert monitor._do_scan() is True
 
-        top_bounds = (0, 0, 2560, 720)
+        close_bounds = (1280, 0, 1280, 720)  # 右上半屏
         nav.find_and_click.assert_called_once_with(
             "popup_close.png",
             timeout=2,
-            bounds=top_bounds,
-            threshold=0.85,
+            bounds=close_bounds,
+            threshold=0.78,
             allow_fallback=False,
         )
         checked_templates = [
@@ -391,7 +391,7 @@ class TestPopupSafety:
             "popup_close_small.png",
         }
         for call in nav.wait_for_template.call_args_list:
-            assert call.kwargs["bounds"] == top_bounds
+            assert call.kwargs["bounds"] == close_bounds
 
     @patch("popup_monitor.time.sleep", return_value=None)
     def test_scan_never_uses_blank_area_fallback(self, _mock_sleep):

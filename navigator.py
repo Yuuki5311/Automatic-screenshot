@@ -214,6 +214,7 @@ class Navigator:
         _threshold = threshold if threshold is not None else self.threshold
 
         start = time.time()
+        best_val = -1.0
         while time.time() - start < timeout:
             screen = self._get_screenshot()
             if bounds is not None:
@@ -223,12 +224,20 @@ class Navigator:
                 search_area = screen
             result = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
+            if max_val > best_val:
+                best_val = max_val
             if max_val >= _threshold:
                 log.info(f"检测到 {template_name} (置信度 {max_val:.2f})")
                 return True
             time.sleep(1)
 
-        log.warning(f"超时未检测到: {template_name}")
+        if best_val >= 0:
+            log.warning(
+                f"超时未检测到: {template_name} "
+                f"(最高置信度 {best_val:.3f}, 阈值 {_threshold})"
+            )
+        else:
+            log.warning(f"超时未检测到: {template_name}")
         return False
 
     def cleanup(self) -> None:
