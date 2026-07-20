@@ -187,71 +187,103 @@ class TestPopupMonitor:
 
     @patch("popup_monitor.time.sleep", return_value=None)
     def test_close_all_popups_max_rounds(self, _mock_sleep):
-        """持续能点到 X 时，应受 max_rounds 限制。"""
+        """持续出现新弹窗时，应受 max_rounds 限制。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
         monitor = PopupMonitor(navigator=nav)
         monitor._click_one_popup = Mock(return_value=True)
+        monitor._wait_and_watch = Mock(return_value=True)
 
         result = monitor.close_all_popups(max_rounds=5)
         assert result == 5, "应返回 5 次关闭"
-        assert monitor._click_one_popup.call_count == 5, "应点击恰好 5 次"
+        assert monitor._click_one_popup.call_count == 5
 
     @patch("popup_monitor.time.sleep", return_value=None)
     def test_close_all_popups_no_popups(self, _mock_sleep):
-        """当前无 X，再等 3s 确认仍无 X，应退出。"""
+        """当前无 X，冷静确认仍无 X，应退出。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
         monitor = PopupMonitor(navigator=nav)
         monitor._click_one_popup = Mock(return_value=False)
-        monitor._find_close_button = Mock(return_value=None)
+        monitor._wait_and_watch = Mock(return_value=False)
 
         result = monitor.close_all_popups(max_rounds=10)
         assert result == 0, "无弹窗应返回 0"
         assert monitor._click_one_popup.call_count == 1
-        assert monitor._find_close_button.call_count == 1
+        assert monitor._wait_and_watch.call_count == 1
 
     @patch("popup_monitor.time.sleep", return_value=None)
-    def test_close_all_popups_waits_then_closes_new_popup(self, mock_sleep):
-        """每次点击后等 3s；若再出现 X，继续关闭-等待循环。"""
+    def test_close_all_popups_waits_then_closes_new_popup(self, _mock_sleep):
+        """每次点击后冷静检测；若再出现 X，继续关闭循环。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
         monitor = PopupMonitor(navigator=nav)
 
-        # 点第 1 个 → 等 3s → 再点第 2 个 → 等 3s → 无 X → 等 3s 确认仍无
-        monitor._click_one_popup = Mock(side_effect=[True, True, False])
-        monitor._find_close_button = Mock(return_value=None)
+        # 点第 1 个 → 冷静期内又有 → 点第 2 个 → 冷静干净
+        monitor._click_one_popup = Mock(side_effect=[True, True])
+        monitor._wait_and_watch = Mock(side_effect=[True, False])
 
         result = monitor.close_all_popups(max_rounds=10)
         assert result == 2, "应关闭 2 个弹窗"
-        assert monitor._click_one_popup.call_count == 3
-        assert monitor._find_close_button.call_count == 1
-        # 两次点击后等待 + 一次无弹窗确认等待
-        assert mock_sleep.call_count >= 3
-        for call in mock_sleep.call_args_list:
-            assert call.args[0] == 3
+        assert monitor._click_one_popup.call_count == 2
+        assert monitor._wait_and_watch.call_count == 2
 
     @patch("popup_monitor.time.sleep", return_value=None)
     def test_close_all_popups_retries_when_new_popup_after_wait(self, _mock_sleep):
-        """点击后等待期间无 X，但 3s 后再检查出现新 X，应继续关。"""
+        """无 X 时冷静期内又出现新 X，应继续关。"""
         from popup_monitor import PopupMonitor
 
         nav = Mock()
         monitor = PopupMonitor(navigator=nav)
 
-        # 第 1 次点到；第 2 次当时点不到；确认时发现新 X；再点掉；再确认干净
-        monitor._click_one_popup = Mock(side_effect=[True, False, True, False])
-        monitor._find_close_button = Mock(
-            side_effect=[("popup_close.png", (0, 0, 1, 1), 0.85), None]
-        )
+        # 先点不到 → 冷静期发现新弹窗 → 点掉 → 冷静干净
+        monitor._click_one_popup = Mock(side_effect=[False, True])
+        monitor._wait_and_watch = Mock(side_effect=[True, False])
 
         result = monitor.close_all_popups(max_rounds=10)
-        assert result == 2
-        assert monitor._click_one_popup.call_count == 4
-        assert monitor._find_close_button.call_count == 2
+        assert result == 1
+        assert monitor._click_one_popup.call_count == 2
+        assert monitor._wait_and_watch.call_count == 2
+
+    @patch("popup_monitor.time.sleep", return_value=None)
+    def test_wait_and_watch_returns_true_when_popup_appears(self, _mock_sleep):
+        """冷静等待期间发现关闭按钮应返回 True。"""
+        from popup_monitor import PopupMonitor
+
+        nav = Mock()
+        monitor = PopupMonitor(navigator=nav)
+        monitor._find_close_button = Mock(
+            side_effect=[None, ("popup_close.png", (0, 0, 1, 1), 0.85)]
+        )
+
+        t = {"v": 0.0}
+
+        def _time():
+            t["v"] += 0.4
+            return t["v"]
+
+        with patch("popup_monitor.time.time", side_effect=_time):
+            assert monitor._wait_and_watch(3.0) is True
+
+    def test_wait_until_idle_returns_immediately_when_not_busy(self):
+        from popup_monitor import PopupMonitor
+
+        monitor = PopupMonitor(navigator=Mock())
+        assert monitor.wait_until_idle(timeout=1) is True
+
+    def test_drain_sets_and_clears_busy(self):
+        from popup_monitor import PopupMonitor
+
+        monitor = PopupMonitor(navigator=Mock())
+        monitor._click_one_popup = Mock(return_value=False)
+        monitor._wait_and_watch = Mock(return_value=False)
+
+        assert not monitor.is_busy
+        monitor.close_all_popups(max_rounds=1)
+        assert not monitor.is_busy
 
 
 # ========== 平台选择 bounds 计算测试 ==========
@@ -548,6 +580,44 @@ class TestSwitchToNewTab:
         with patch("game_launcher.time.time", side_effect=[0.0, 0.1, 0.2, 0.3]):
             assert switch_to_new_tab(driver, "home", timeout=5) is True
         driver.switch_to.window.assert_called_once_with("game")
+
+
+# ========== 截图点击守卫测试 ==========
+
+class TestScreenshotClickGuard:
+    """测试点击解析与生效验证模板选择。"""
+
+    def test_parse_template_only(self):
+        from screenshot_click import parse_click_item
+
+        p = parse_click_item(("shop_icon.png", "点击商城"))
+        assert p["template"] == "shop_icon.png"
+        assert p["bounds"] is None
+        assert p["anchor"] is None
+
+    def test_parse_coords_item(self):
+        from screenshot_click import parse_click_item
+
+        p = parse_click_item(("__coords__", "点头像", (10, 20), "game_main.png"))
+        assert p["template"] == "__coords__"
+        assert p["bounds"] == (10, 20)
+        assert p["anchor"] == "game_main.png"
+
+    def test_effect_verify_uses_next_template(self):
+        from screenshot_click import effect_verify_template
+
+        assert effect_verify_template(("lottery_tab.png", "夺宝")) == "lottery_tab.png"
+
+    def test_effect_verify_last_step_is_none(self):
+        from screenshot_click import effect_verify_template
+
+        assert effect_verify_template(None) is None
+
+    def test_effect_verify_next_coords_uses_anchor(self):
+        from screenshot_click import effect_verify_template
+
+        nxt = ("__coords__", "小兵", (1, 2), "back_arrow.png")
+        assert effect_verify_template(nxt) == "back_arrow.png"
 
 
 # ========== 截图任务配置测试 ==========

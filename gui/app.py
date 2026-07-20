@@ -367,6 +367,7 @@ class App(tk.Tk):
             from navigator import Navigator
             from screenshotter import Screenshotter
             from popup_monitor import PopupMonitor
+            from screenshot_click import parse_click_item, effect_verify_template
             _log.info("工作流模块就绪")
 
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -801,80 +802,181 @@ class App(tk.Tk):
                     all_ok = True
                     last_step = None  # (verify_template, rollback_action)
                     rollback_count = 0  # 防止同一节点反复回退
+                    CLICK_EFFECT_RETRIES = 2
+                    EFFECT_VERIFY_TIMEOUT = 5
 
-                    for item in clicks:
-                        anchor = None
-                        if len(item) == 4:
-                            # __coords__ 格式: (template, desc, coords, anchor)
-                            template, desc, coords, anchor = item
-                            bounds = coords
-                        elif len(item) == 3:
-                            template, desc, bounds = item
-                        else:
-                            template, desc = item
-                            bounds = None
+                    for step_i, item in enumerate(clicks):
+                        parsed = parse_click_item(item)
+                        template = parsed["template"]
+                        desc = parsed["desc"]
+                        bounds = parsed["bounds"]
+                        anchor = parsed["anchor"]
+                        next_item = (
+                            clicks[step_i + 1] if step_i + 1 < len(clicks) else None
+                        )
+                        verify_tpl = effect_verify_template(next_item)
 
-                        # 等待弹窗冷却（关闭后 3s 无新弹窗）
-                        if monitor is not None:
-                            monitor.wait_until_clear(3)
+                        step_done = False
+                        match_failed = False
 
-                        # 坐标点击
-                        if template == "__coords__":
-                            x, y = bounds
-                            nav.click_css(x, y)
-                            self._send({"type": "log", "text": f"  🖱 坐标点击 ({x}, {y})"})
-                            _log.info(f"坐标点击 ({x}, {y})")
-                            time.sleep(CLICK_INTERVAL)
+                        for attempt in range(1, CLICK_EFFECT_RETRIES + 2):
+                            # B: 若异步正在关弹窗/冷静，先等其结束；再清弹窗并暂停监控后点击
+                            if monitor is not None:
+                                monitor.wait_until_idle()
+                                monitor.wait_until_clear(3)
+                                monitor.pause()
+
+                            clicked = False
+                            try:
+                                if template == "__coords__":
+                                    x, y = bounds
+                                    nav.click_css(x, y)
+                                    self._send({
+                                        "type": "log",
+                                        "text": f"  🖱 坐标点击 ({x}, {y})",
+                                    })
+                                    _log.info(f"坐标点击 ({x}, {y})")
+                                    time.sleep(CLICK_INTERVAL)
+                                    clicked = True
+                                else:
+                                    clicked = bool(
+                                        nav.find_and_click(template, bounds=bounds)
+                                    )
+                            finally:
+                                if monitor is not None:
+                                    monitor.resume()
+
+                            if not clicked:
+                                match_failed = True
+                                break
+
+                            # A: 有下一步模板则验证点击是否生效
+                            if verify_tpl is None:
+                                step_done = True
+                                break
+
+                            if nav.wait_for_template(
+                                verify_tpl, timeout=EFFECT_VERIFY_TIMEOUT
+                            ):
+                                step_done = True
+                                break
+
+                            self._send({
+                                "type": "log",
+                                "text": (
+                                    f"  ⚠ 点击后未出现 {verify_tpl}，"
+                                    f"可能被弹窗挡住，重试 ({attempt}/{CLICK_EFFECT_RETRIES + 1})"
+                                ),
+                                "level": "warn",
+                            })
+                            if monitor is not None:
+                                monitor.close_all_popups()
+
+                        if step_done:
                             consecutive_failures = 0
-                            last_step = (anchor, lambda _x=x, _y=y: nav.click_css(_x, _y))
+                            if template == "__coords__":
+                                x, y = bounds
+                                last_step = (
+                                    anchor,
+                                    lambda _x=x, _y=y: nav.click_css(_x, _y),
+                                )
+                            else:
+                                _t = template
+                                _b = bounds
+                                last_step = (
+                                    _t,
+                                    lambda _t=_t, _b=_b: nav.find_and_click(
+                                        _t, bounds=_b
+                                    ),
+                                )
+                            continue
 
-                        elif not nav.find_and_click(template, bounds=bounds):
-                            consecutive_failures += 1
-                            all_ok = False
-                            self._send({"type": "log", "text": f"  ⚠ 找不到 {template}", "level": "warn"})
+                        # 匹配失败，或多次点击后仍无生效
+                        consecutive_failures += 1
+                        all_ok = False
+                        if match_failed:
+                            self._send({
+                                "type": "log",
+                                "text": f"  ⚠ 找不到 {template}",
+                                "level": "warn",
+                            })
+                        else:
+                            self._send({
+                                "type": "log",
+                                "text": f"  ⚠ 点击 {desc} 未生效（被弹窗打断？）",
+                                "level": "warn",
+                            })
 
-                            # 有上一步锚点 → 立即检查是否页面还在，在则回退重试
-                            if last_step is not None and rollback_count == 0:
-                                verify_template, rollback = last_step
-                                if nav.wait_for_template(verify_template, timeout=2):
-                                    self._send({"type": "log", "text": f"  ↩ 回退：{verify_template} 可见，重试上一步", "level": "warn"})
+                        # 有上一步锚点 → 立即检查是否页面还在，在则回退重试
+                        if last_step is not None and rollback_count == 0:
+                            verify_template, rollback = last_step
+                            if nav.wait_for_template(verify_template, timeout=2):
+                                self._send({
+                                    "type": "log",
+                                    "text": f"  ↩ 回退：{verify_template} 可见，重试上一步",
+                                    "level": "warn",
+                                })
+                                if monitor is not None:
+                                    monitor.pause()
+                                try:
                                     rollback()
                                     time.sleep(CLICK_INTERVAL)
-                                    consecutive_failures = 0
-                                    rollback_count += 1
-                                    all_ok = True
-                                    continue
+                                finally:
+                                    if monitor is not None:
+                                        monitor.resume()
+                                consecutive_failures = 0
+                                rollback_count += 1
+                                all_ok = True
+                                continue
 
-                            # 连续失败 ≥2 且主界面头像消失 → 游戏可能崩溃
-                            if consecutive_failures >= 2 and not nav.wait_for_template("avatar.png", timeout=2):
-                                self._send({"type": "log", "text": "⚠️ 游戏可能已重启，尝试恢复...", "level": "warn"})
-                                if _do_recover():
-                                    self._send({"type": "log", "text": "✅ 游戏已恢复，重新开始截图", "level": "success"})
-                                    restart_loop = True
-                                else:
-                                    self._send({"type": "log", "text": "❌ 游戏恢复失败", "level": "error"})
-                            break
-
-                        else:
-                            consecutive_failures = 0
-                            _t = template
-                            _b = bounds
-                            last_step = (_t, lambda _t=_t, _b=_b: nav.find_and_click(_t, bounds=_b))
-
-                        # 贵族：点击图标后无需同步清理，异步监控处理
+                        # 连续失败 ≥2 且主界面头像消失 → 游戏可能崩溃
+                        if consecutive_failures >= 2 and not nav.wait_for_template(
+                            "avatar.png", timeout=2
+                        ):
+                            self._send({
+                                "type": "log",
+                                "text": "⚠️ 游戏可能已重启，尝试恢复...",
+                                "level": "warn",
+                            })
+                            if _do_recover():
+                                self._send({
+                                    "type": "log",
+                                    "text": "✅ 游戏已恢复，重新开始截图",
+                                    "level": "success",
+                                })
+                                restart_loop = True
+                            else:
+                                self._send({
+                                    "type": "log",
+                                    "text": "❌ 游戏恢复失败",
+                                    "level": "error",
+                                })
+                        break
 
                     if restart_loop:
                         break
 
                     if all_ok:
+                        if monitor is not None:
+                            monitor.wait_until_idle()
+                            monitor.wait_until_clear(3)
                         time.sleep(PAGE_LOAD_WAIT)
                         shot.take(name)
                         success += 1
                         self._send({"type": "log", "text": f"  已截图: {name}", "level": "success"})
 
                         for _ in range(back_count):
-                            nav.find_and_click("back_arrow.png", timeout=3)
+                            if monitor is not None:
+                                monitor.wait_until_idle()
+                                monitor.pause()
+                            try:
+                                nav.find_and_click("back_arrow.png", timeout=3)
+                            finally:
+                                if monitor is not None:
+                                    monitor.resume()
                             time.sleep(3)
+                            if monitor is not None:
+                                monitor.wait_until_idle()
 
                         # 异步监控在间隔期间自动处理弹窗
 
