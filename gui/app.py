@@ -630,33 +630,29 @@ class App(tk.Tk):
 
             _log.info("[阶段3] 游戏登录成功")
             self._send({"type": "page", "name": "progress"})
-            self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
+            self._send({"type": "log", "text": "✅ 游戏登录成功（已点进入游戏）", "level": "success"})
 
-            # ---- 验证：确认已进入游戏主界面 ----
-            self._send({"type": "log", "text": "验证游戏主界面..."})
+            # ---- 进入游戏后先等 10 秒，再清弹窗，然后验证是否进入主界面 ----
+            self._send({"type": "log", "text": "等待 10 秒后处理弹窗..."})
+            time.sleep(10)
+            self._send({"type": "log", "text": "进入游戏后清理弹窗..."})
+            monitor = PopupMonitor(navigator=nav)
+            monitor.close_all_popups()
             time.sleep(3)
-            if not nav.wait_for_template("avatar.png", timeout=10):
+            monitor.close_all_popups()
+            monitor.wait_until_clear(3)
+            self._send({"type": "log", "text": "弹窗清理完毕，验证游戏主界面..."})
+
+            if not nav.wait_for_template("avatar.png", timeout=15):
                 _log.error("[阶段3] 游戏登录验证失败：未检测到主界面头像")
                 self._send({"type": "log", "text": "❌ 未进入游戏主界面，登录可能失败", "level": "error"})
                 self._send({"type": "done", "text": "❌ 未进入游戏主界面"})
                 return
 
             # ====== 阶段 4: 截图 ======
-            self._send({"type": "log", "text": "等待 10 秒后处理弹窗..."})
-            time.sleep(10)
-
-            # ---- 弹窗监控配置（阶段 4 全程异步） ----
-            # 修改弹窗检测逻辑：编辑 popup_monitor.py 的 _do_scan() 中 buttons 列表
-            monitor = PopupMonitor(navigator=nav)
-            self._send({"type": "log", "text": "正在清理弹窗..."})
-            monitor.close_all_popups()
-            self._send({"type": "log", "text": "弹窗清理完毕，等待 3 秒..."})
-            time.sleep(3)
-            monitor.close_all_popups()
-            monitor.wait_until_clear(3)
-            self._send({"type": "log", "text": "冷却完成，确认无弹窗..."})
-            # 启动异步弹窗监控，截图全程后台扫描
+            # 弹窗已在验证前清理；启动异步监控，截图全程后台扫描
             monitor.start()
+            self._send({"type": "log", "text": "异步弹窗监控已启动"})
             _log.info("阶段 4 异步弹窗监控已启动")
 
             avatar_bounds = None
@@ -689,7 +685,7 @@ class App(tk.Tk):
             # __coords__ 格式: ("__coords__", 描述, (x, y), 锚点模板)
             screenshot_tasks = [
                 ("主页", [
-                    ("__coords__", "点击左上角头像", _avatar_xy, "avatar.png"),
+                    ("__coords__", "点击左上角头像", _avatar_xy, "game_main.png"),
                     ("tab_home.png", "点击主页标签"),
                 ], 0),
                 ("英雄", [
@@ -704,11 +700,30 @@ class App(tk.Tk):
                 ], 1),
                 ("皮肤图鉴", [
                     ("skin_illustrated.png", "点击皮肤图鉴"),
+                ], 0),
+                ("珍品无双", [
+                    ("skin_treasure_wushuang.png", "点击珍品无双"),
                 ], 1),
+                ("荣耀典藏", [
+                    ("skin_glory_collection.png", "点击荣耀典藏"),
+                ], 1),
+                ("无双", [
+                    ("skin_wushuang.png", "点击无双"),
+                ], 1),
+                ("珍品传说", [
+                    ("skin_treasure_legend.png", "点击珍品传说"),
+                ], 1),
+                ("传说", [
+                    ("skin_legend.png", "点击传说"),
+                ], 2),
                 ("积分夺宝", [
                     ("shop_icon.png", "点击商城"),
                     ("lottery_tab.png", "点击夺宝"),
                     ("points_lottery.png", "点击积分夺宝"),
+                ], 2),
+                ("货币背包", [
+                    ("bag.png", "点击背包"),
+                    ("currency_bag.png", "点击货币背包"),
                 ], 2),
                 ("小兵", [
                     ("customize_icon.png", "点击定制"),
@@ -922,6 +937,16 @@ class App(tk.Tk):
                 break
 
             self._send({"type": "log", "text": "已退出游戏登录", "level": "info"})
+
+            # 退出后同步清理残留弹窗，避免带入下一轮
+            if monitor is not None:
+                monitor.pause()
+                self._send({"type": "log", "text": "正在清理退出后残留弹窗..."})
+                monitor.close_all_popups()
+                time.sleep(3)
+                monitor.close_all_popups()
+                monitor.wait_until_clear(3)
+                self._send({"type": "log", "text": "残留弹窗清理完成", "level": "success"})
 
             self._send({
                 "type": "done",

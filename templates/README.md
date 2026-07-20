@@ -35,6 +35,13 @@
 | `universal_illustrated.png` | 万象图鉴入口 |
 | `lingbao.png` | 灵宝入口 |
 | `skin_illustrated.png` | 皮肤图鉴入口 |
+| `skin_treasure_wushuang.png` | 珍品无双图标（皮肤图鉴页内） |
+| `skin_glory_collection.png` | 荣耀典藏图标（皮肤图鉴页内） |
+| `skin_wushuang.png` | 无双图标（皮肤图鉴页内） |
+| `skin_treasure_legend.png` | 珍品传说图标（皮肤图鉴页内） |
+| `skin_legend.png` | 传说图标（皮肤图鉴页内） |
+| `bag.png` | 主界面背包按钮 |
+| `currency_bag.png` | 背包页右上角货币背包 |
 
 ### 商城
 | 文件名 | 说明 |

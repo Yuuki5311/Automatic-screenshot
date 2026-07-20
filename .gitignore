@@ -1,6 +1,11 @@
 # 截图输出
 screenshots/
 
+# 打包产物
+AutoScreenshot.exe
+dist/
+build/
+
 # Python
 __pycache__/
 *.pyc

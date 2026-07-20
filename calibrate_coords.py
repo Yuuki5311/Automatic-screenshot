@@ -47,6 +47,13 @@ TARGETS = [
     ("universal_illustrated", "【万象图鉴】入口", "图鉴页"),
     ("lingbao", "【灵宝】入口", "万象图鉴页"),
     ("skin_illustrated", "【皮肤图鉴】入口", "图鉴页"),
+    ("skin_treasure_wushuang", "【珍品无双】图标", "皮肤图鉴页"),
+    ("skin_glory_collection", "【荣耀典藏】图标", "皮肤图鉴页"),
+    ("skin_wushuang", "【无双】图标", "皮肤图鉴页"),
+    ("skin_treasure_legend", "【珍品传说】图标", "皮肤图鉴页"),
+    ("skin_legend", "【传说】图标", "皮肤图鉴页"),
+    ("bag", "【背包】按钮", "主界面"),
+    ("currency_bag", "【货币背包】按钮", "背包页右上角"),
     # ---- 商城 ----
     ("lottery_tab", "【夺宝】标签", "商城页"),
     ("points_lottery", "【积分夺宝】入口", "夺宝页"),

@@ -59,6 +59,13 @@ TEMPLATES = [
     ("universal_illustrated.png", "【万象图鉴】入口", "图鉴页"),
     ("lingbao.png", "【灵宝】入口", "万象图鉴页"),
     ("skin_illustrated.png", "【皮肤图鉴】入口", "图鉴页"),
+    ("skin_treasure_wushuang.png", "【珍品无双】图标", "皮肤图鉴页"),
+    ("skin_glory_collection.png", "【荣耀典藏】图标", "皮肤图鉴页"),
+    ("skin_wushuang.png", "【无双】图标", "皮肤图鉴页"),
+    ("skin_treasure_legend.png", "【珍品传说】图标", "皮肤图鉴页"),
+    ("skin_legend.png", "【传说】图标", "皮肤图鉴页"),
+    ("bag.png", "【背包】按钮", "主界面"),
+    ("currency_bag.png", "【货币背包】按钮", "背包页右上角"),
     # ---- 商城 ----
     ("lottery_tab.png", "【夺宝】标签", "商城页"),
     ("points_lottery.png", "【积分夺宝】入口", "夺宝页"),
