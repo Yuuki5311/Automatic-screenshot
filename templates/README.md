@@ -34,6 +34,10 @@
 |--------|------|
 | `universal_illustrated.png` | 万象图鉴入口 |
 | `lingbao.png` | 灵宝入口 |
+| `tianmu.png` | 天幕入口（万象图鉴页，需重新截取） |
+| `xingyuan.png` | 星元入口（万象图鉴页） |
+| `xing_collection.png` | 星典藏入口（星元页内） |
+| `xing_legend.png` | 星传说入口（星元页内） |
 | `skin_illustrated.png` | 皮肤图鉴入口 |
 | `skin_treasure_wushuang.png` | 珍品无双图标（皮肤图鉴页内） |
 | `skin_glory_collection.png` | 荣耀典藏图标（皮肤图鉴页内） |
@@ -54,7 +58,6 @@
 |--------|------|
 | `skin_customize.png` | 皮肤定制 |
 | `my_tab.png` | 我的标签 |
-| `sky_curtain.png` | 天幕 |
 | `minion.png` | 小兵 |
 | `personal_customize.png` | 个性定制 |
 | `poke.png` | 个性戳戳 |

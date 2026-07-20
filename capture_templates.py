@@ -10,6 +10,8 @@
 使用方法:
     python capture_templates.py
     python capture_templates.py --only game_logout_btn.png
+    python capture_templates.py --only tianmu.png xingyuan.png
+    python capture_templates.py --only tianmu.png,xingyuan.png,xing_collection.png,xing_legend.png
     python capture_templates.py --all
 """
 
@@ -58,6 +60,10 @@ TEMPLATES = [
     # ---- 图鉴 ----
     ("universal_illustrated.png", "【万象图鉴】入口", "图鉴页"),
     ("lingbao.png", "【灵宝】入口", "万象图鉴页"),
+    ("tianmu.png", "【天幕】入口（需新截取）", "万象图鉴页"),
+    ("xingyuan.png", "【星元】入口", "万象图鉴页"),
+    ("xing_collection.png", "【星典藏】入口", "星元页内"),
+    ("xing_legend.png", "【星传说】入口", "星元页内"),
     ("skin_illustrated.png", "【皮肤图鉴】入口", "图鉴页"),
     ("skin_treasure_wushuang.png", "【珍品无双】图标", "皮肤图鉴页"),
     ("skin_glory_collection.png", "【荣耀典藏】图标", "皮肤图鉴页"),
@@ -72,7 +78,6 @@ TEMPLATES = [
     # ---- 定制 ----
     ("skin_customize.png", "【皮肤定制】入口", "定制页"),
     ("my_tab.png", "【我的】标签", "皮肤定制页"),
-    ("sky_curtain.png", "【天幕】选项", "皮肤定制-我的"),
     ("minion.png", "【小兵】选项", "皮肤定制-我的"),
     ("personal_customize.png", "【个性定制】入口", "定制页"),
     ("poke.png", "【个性戳戳】入口", "个性定制页"),
@@ -313,7 +318,7 @@ def parse_args():
         "--only",
         nargs="+",
         metavar="FILE",
-        help="只采集指定文件名，如 game_logout_btn.png",
+        help="只采集指定文件名；空格或逗号均可，如 tianmu.png xingyuan.png 或 a.png,b.png",
     )
     p.add_argument(
         "--from",
@@ -327,7 +332,16 @@ def parse_args():
 def resolve_items(args) -> list:
     items = list(TEMPLATES)
     if args.only:
-        wanted = set(args.only)
+        # 支持空格分隔与逗号分隔（含混用）
+        wanted: set[str] = set()
+        for token in args.only:
+            for part in token.split(","):
+                name = part.strip()
+                if not name:
+                    continue
+                if not name.endswith(".png"):
+                    name = f"{name}.png"
+                wanted.add(name)
         items = [t for t in TEMPLATES if t[0] in wanted]
         missing = wanted - {t[0] for t in items}
         if missing:

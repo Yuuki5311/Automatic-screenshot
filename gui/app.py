@@ -699,6 +699,16 @@ class App(tk.Tk):
                 ("万象图鉴-灵宝", [
                     ("lingbao.png", "点击灵宝"),
                 ], 1),
+                ("天幕", [
+                    ("tianmu.png", "点击天幕"),
+                ], 1),
+                ("星典藏", [
+                    ("xingyuan.png", "点击星元"),
+                    ("xing_collection.png", "点击星典藏"),
+                ], 0),
+                ("星传说", [
+                    ("xing_legend.png", "点击星传说"),
+                ], 1),
                 ("皮肤图鉴", [
                     ("skin_illustrated.png", "点击皮肤图鉴"),
                 ], 0),
