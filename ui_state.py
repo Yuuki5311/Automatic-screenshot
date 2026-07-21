@@ -109,15 +109,25 @@ def classify_from_scores(
     return UiState.UNKNOWN, info
 
 
-def match_score(nav, template_name: str, bounds=None, threshold: float | None = None) -> float:
-    """对单模板做一次匹配，返回最高置信度（不做等待循环）。"""
+def match_score(
+    nav,
+    template_name: str,
+    bounds=None,
+    threshold: float | None = None,
+    screen=None,
+) -> float:
+    """对单模板做一次匹配，返回最高置信度（不做等待循环）。
+
+    screen: 可选已截取的 BGR 帧；传入时不再调用 nav._get_screenshot()。
+    """
     import cv2
 
     template = nav._load_template(template_name)
     if template is None:
         return -1.0
 
-    screen = nav._get_screenshot()
+    if screen is None:
+        screen = nav._get_screenshot()
     if bounds is not None:
         x, y, w, h = bounds
         search_area = screen[y : y + h, x : x + w]
@@ -137,32 +147,43 @@ def classify(
     path_templates: list[str] | None = None,
     *,
     allow_confirm: bool = False,
+    screen=None,
 ) -> tuple[UiState, dict[str, Any]]:
-    """截取当前画面相关模板分数并分类。"""
+    """截取当前画面相关模板分数并分类。
+
+    同一轮内所有模板分数来自同一帧；未传入 screen 时只截屏一次。
+    """
     path_templates = path_templates or []
-    vw, vh = nav.viewport_size()
+    if screen is None:
+        screen = nav._get_screenshot()
+    vh, vw = screen.shape[:2]
     popup_bounds = popup_close_bounds(vw, vh)
     av_bounds = avatar_bounds(vw, vh)
 
     scores: dict[str, float] = {}
     for tpl in POPUP_CLOSE_TEMPLATES:
-        scores[tpl] = match_score(nav, tpl, bounds=popup_bounds)
+        scores[tpl] = match_score(nav, tpl, bounds=popup_bounds, screen=screen)
 
     for tpl in LOGIN_TEMPLATES:
-        scores[tpl] = match_score(nav, tpl)
+        scores[tpl] = match_score(nav, tpl, screen=screen)
 
-    scores[MAIN_TEMPLATE] = match_score(nav, MAIN_TEMPLATE, bounds=av_bounds)
+    scores[MAIN_TEMPLATE] = match_score(
+        nav, MAIN_TEMPLATE, bounds=av_bounds, screen=screen
+    )
 
     for tpl in path_templates:
         if tpl == "__coords__":
             continue
-        scores[tpl] = match_score(nav, tpl)
+        scores[tpl] = match_score(nav, tpl, screen=screen)
 
     if allow_confirm:
         from login import bottom_half_bounds
 
         scores[CONFIRM_TEMPLATE] = match_score(
-            nav, CONFIRM_TEMPLATE, bounds=bottom_half_bounds(vw, vh)
+            nav,
+            CONFIRM_TEMPLATE,
+            bounds=bottom_half_bounds(vw, vh),
+            screen=screen,
         )
 
     state, info = classify_from_scores(

@@ -96,6 +96,18 @@ class Navigator:
         actions.pointer_action.click()
         actions.perform()
 
+    def grab_roi(self, x: int, y: int, w: int, h: int) -> np.ndarray:
+        """截取视口后裁切 ROI（P0：全图再裁；后续可换 CDP clip）。"""
+        screen = self._get_screenshot()
+        vh, vw = screen.shape[:2]
+        x0 = max(0, int(x))
+        y0 = max(0, int(y))
+        x1 = min(vw, x0 + max(1, int(w)))
+        y1 = min(vh, y0 + max(1, int(h)))
+        if x1 <= x0 or y1 <= y0:
+            return np.zeros((1, 1, 3), dtype=np.uint8)
+        return screen[y0:y1, x0:x1].copy()
+
     def _click_at(self, x: int, y: int) -> None:
         """在浏览器视口 CSS 坐标 (x, y) 处点击。"""
         self.click_css(x, y)

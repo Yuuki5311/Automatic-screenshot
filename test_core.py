@@ -700,6 +700,17 @@ class TestUiClassify:
         assert state == UiState.POPUP
         assert info["scores"]["popup_close.png"] >= POPUP_CLOSE_THRESHOLD
 
+    def test_popup_small_can_classify_popup(self):
+        """真实小弹窗用 popup_close_small，应能判为 POPUP。"""
+        from ui_state import UiState, classify_from_scores, POPUP_CLOSE_THRESHOLD
+
+        state, _ = classify_from_scores({
+            "popup_close_small.png": POPUP_CLOSE_THRESHOLD,
+            "popup_close.png": 0.50,
+            "avatar.png": 0.40,
+        })
+        assert state == UiState.POPUP
+
     def test_login_wins_over_main(self):
         from ui_state import UiState, classify_from_scores
 
@@ -775,6 +786,34 @@ class TestUiClassify:
         from ui_state import popup_close_bounds
 
         assert popup_close_bounds(2560, 1440) == (1280, 0, 1280, 720)
+
+    def test_match_score_uses_provided_screen_without_resnap(self):
+        from ui_state import match_score
+
+        tpl = np.zeros((10, 10, 3), dtype=np.uint8)
+        tpl[2:8, 2:8] = 255
+        screen = np.zeros((50, 50, 3), dtype=np.uint8)
+        screen[5:15, 5:15] = tpl
+
+        nav = Mock()
+        nav._load_template.return_value = tpl
+        score = match_score(nav, "avatar.png", screen=screen)
+        nav._get_screenshot.assert_not_called()
+        assert score > 0.9
+
+    def test_classify_captures_screenshot_only_once(self):
+        from ui_state import classify, UiState
+
+        rng = np.random.default_rng(0)
+        screen = rng.integers(0, 40, (100, 200, 3), dtype=np.uint8)
+        tpl = rng.integers(200, 255, (8, 8, 3), dtype=np.uint8)
+        nav = Mock()
+        nav._get_screenshot.return_value = screen
+        nav._load_template.return_value = tpl
+
+        state, _ = classify(nav, path_templates=["tab_home.png"])
+        assert nav._get_screenshot.call_count == 1
+        assert state == UiState.UNKNOWN
 
 
 # ========== 轻量 FSM：决策与 Goal ==========
@@ -895,10 +934,20 @@ class TestUiLoopRun:
         nav.viewport_size.return_value = (1920, 1080)
         nav.find_and_click.return_value = True
         nav.wait_for_template.return_value = True
+        nav._get_screenshot.return_value = np.zeros((100, 100, 3), dtype=np.uint8)
         shot = Mock()
         shot.take.return_value = "x.png"
 
         actions = []
+
+        from click_confirm import ClickPlan
+        plan = ClickPlan(
+            x=1, y=1,
+            roi_ref=np.zeros((10, 10, 3), dtype=np.uint8),
+            template_name="tab_home.png",
+            score=0.99,
+            roi_box=(0, 0, 10, 10),
+        )
 
         loop = UiLoop(
             nav=nav,
@@ -911,7 +960,10 @@ class TestUiLoopRun:
         with patch("ui_loop.time.sleep", return_value=None), \
              patch("ui_loop.PAGE_LOAD_WAIT", 0), \
              patch("ui_loop.CLICK_INTERVAL", 0), \
-             patch("ui_loop.random.uniform", return_value=0):
+             patch("ui_loop.random.uniform", return_value=0), \
+             patch.object(loop, "_ensure_clear_for_click", return_value=True), \
+             patch("click_confirm.plan_template_click", return_value=plan), \
+             patch("click_confirm.execute_click_with_confirm", return_value=True):
             # wrap _close_popup / _do_click to record order
             orig_close = loop._close_popup
             orig_click = loop._do_click_step
@@ -933,6 +985,236 @@ class TestUiLoopRun:
         assert "click" in actions
         assert actions.index("close") < actions.index("click")
         shot.take.assert_called_with("主页")
+
+    def test_ensure_clear_for_click_closes_and_blocks(self):
+        from ui_loop import UiLoop
+
+        nav = Mock()
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[("主页", [("tab_home.png", "d")], 0)],
+            tick_s=0,
+        )
+        with patch.object(loop, "_popup_pending", return_value=True), \
+             patch.object(loop, "_close_popup") as close_mock:
+            assert loop._ensure_clear_for_click() is False
+            close_mock.assert_called_once()
+
+    def test_do_click_step_skips_when_popup_pending(self):
+        from ui_loop import UiLoop
+
+        nav = Mock()
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[("主页", [("tab_home.png", "d")], 0)],
+            tick_s=0,
+        )
+        with patch.object(loop, "_ensure_clear_for_click", return_value=False):
+            loop._do_click_step()
+        nav.find_and_click.assert_not_called()
+        assert loop.goal.click_index == 0
+
+    def test_do_back_skips_when_popup_pending(self):
+        from ui_loop import UiLoop
+
+        nav = Mock()
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[("页", [("x.png", "d")], 1)],
+            tick_s=0,
+        )
+        loop.goal.click_index = 1
+        loop.goal.mark_shot_done()
+        with patch.object(loop, "_ensure_clear_for_click", return_value=False):
+            loop._do_back()
+        nav.find_and_click.assert_not_called()
+        assert loop.goal.backs_done == 0
+
+    def test_do_back_does_not_advance_when_verify_fails(self):
+        """返回未生效 → 回退到本任务上一步（重新点击），而非卡在 go_back。"""
+        from ui_loop import UiLoop
+        from click_confirm import ClickPlan
+        import numpy as np
+
+        nav = Mock()
+        nav.wait_for_template.return_value = False
+        plan = ClickPlan(
+            x=10, y=10,
+            roi_ref=np.zeros((20, 20, 3), dtype=np.uint8),
+            template_name="back_arrow.png",
+            score=0.99,
+            roi_box=(0, 0, 20, 20),
+        )
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[
+                ("灵宝", [("lingbao.png", "d")], 1),
+                ("天幕", [("tianmu.png", "d")], 1),
+            ],
+            tick_s=0,
+        )
+        loop.goal.click_index = 1
+        loop.goal.mark_shot_done()
+        assert loop.goal.success == 1
+        assert loop.goal.phase_need_back()
+        with patch("ui_loop.time.sleep", return_value=None), \
+             patch.object(loop, "_ensure_clear_for_click", return_value=True), \
+             patch.object(loop, "_drain_popups_briefly"), \
+             patch.object(loop, "_recover_toward_current_step") as recover, \
+             patch("click_confirm.plan_template_click", return_value=plan), \
+             patch("click_confirm.execute_click_with_confirm", return_value=True):
+            loop._do_back()
+        assert loop.goal.task_index == 0
+        assert loop.goal.backs_done == 0
+        assert loop.goal.click_index == 0
+        assert getattr(loop.goal, "_shot_done", False) is False
+        assert loop.goal.success == 0
+        assert loop.goal.phase_need_click()
+        recover.assert_called_once()
+        nav.wait_for_template.assert_any_call("tianmu.png", timeout=5)
+
+    def test_rewind_to_previous_step_from_shot(self):
+        from ui_loop import Goal
+
+        g = Goal([
+            ("首页", [("a.png", "d")], 0),
+            ("灵宝", [("lingbao.png", "d")], 1),
+        ])
+        g.task_index = 1
+        g.click_index = 1
+        g.mark_shot_done()
+        msg = g.rewind_to_previous_step()
+        assert "点击步骤" in msg
+        assert g.task_index == 1
+        assert g.click_index == 0
+        assert g.success == 0
+        assert not getattr(g, "_shot_done", False)
+
+    def test_do_back_advances_when_verify_ok(self):
+        from ui_loop import UiLoop
+        from click_confirm import ClickPlan
+        import numpy as np
+
+        nav = Mock()
+        nav.wait_for_template.return_value = True
+        plan = ClickPlan(
+            x=10, y=10,
+            roi_ref=np.zeros((20, 20, 3), dtype=np.uint8),
+            template_name="back_arrow.png",
+            score=0.99,
+            roi_box=(0, 0, 20, 20),
+        )
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[
+                ("灵宝", [("lingbao.png", "d")], 1),
+                ("天幕", [("tianmu.png", "d")], 1),
+            ],
+            tick_s=0,
+        )
+        loop.goal.click_index = 1
+        loop.goal.mark_shot_done()
+        with patch("ui_loop.time.sleep", return_value=None), \
+             patch("ui_loop.random.uniform", return_value=0), \
+             patch.object(loop, "_ensure_clear_for_click", return_value=True), \
+             patch.object(loop, "_drain_popups_briefly"), \
+             patch("click_confirm.plan_template_click", return_value=plan), \
+             patch("click_confirm.execute_click_with_confirm", return_value=True):
+            loop._do_back()
+        assert loop.goal.task_index == 1
+        assert loop.goal.backs_done == 0
+
+    def test_do_back_roi_fail_does_not_rewind(self):
+        """ROI 未确认：点击未发出，游标保持待返回，不回退上一步。"""
+        from ui_loop import UiLoop
+        from click_confirm import ClickPlan
+        import numpy as np
+
+        nav = Mock()
+        plan = ClickPlan(
+            x=10, y=10,
+            roi_ref=np.zeros((20, 20, 3), dtype=np.uint8),
+            template_name="back_arrow.png",
+            score=0.99,
+            roi_box=(0, 0, 20, 20),
+        )
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[
+                ("灵宝", [("lingbao.png", "d")], 1),
+                ("天幕", [("tianmu.png", "d")], 1),
+            ],
+            tick_s=0,
+        )
+        loop.goal.click_index = 1
+        loop.goal.mark_shot_done()
+        with patch("ui_loop.time.sleep", return_value=None), \
+             patch.object(loop, "_ensure_clear_for_click", return_value=True), \
+             patch("click_confirm.plan_template_click", return_value=plan), \
+             patch("click_confirm.execute_click_with_confirm", return_value=False), \
+             patch.object(loop, "_recover_toward_current_step") as recover:
+            loop._do_back()
+        assert loop.goal.task_index == 0
+        assert loop.goal.phase_need_back()
+        assert loop.goal.success == 1
+        recover.assert_not_called()
+        nav.wait_for_template.assert_not_called()
+
+
+class TestClickConfirm:
+    """ROI 双重确认。"""
+
+    def test_roi_similar_same_image_passes(self):
+        from click_confirm import roi_similar
+
+        img = np.random.default_rng(1).integers(0, 255, (40, 40, 3), dtype=np.uint8)
+        ok, score = roi_similar(img, img.copy())
+        assert ok
+        assert score >= 0.90
+
+    def test_roi_similar_blocked_fails(self):
+        from click_confirm import roi_similar
+
+        ref = np.random.default_rng(2).integers(0, 255, (40, 40, 3), dtype=np.uint8)
+        now = ref.copy()
+        now[10:30, 10:30] = 0
+        ok, score = roi_similar(ref, now)
+        assert not ok
+
+    def test_execute_click_skips_when_confirm_fails(self):
+        from click_confirm import ClickPlan, execute_click_with_confirm
+
+        nav = Mock()
+        nav.grab_roi.return_value = np.zeros((30, 30, 3), dtype=np.uint8)
+        ref = np.random.default_rng(3).integers(0, 255, (30, 30, 3), dtype=np.uint8)
+        plan = ClickPlan(
+            x=15, y=15, roi_ref=ref, template_name="t.png",
+            score=0.99, roi_box=(0, 0, 30, 30),
+        )
+        with patch("click_confirm.time.sleep", return_value=None):
+            assert execute_click_with_confirm(nav, plan) is False
+        nav.click_css.assert_not_called()
+
+    def test_execute_click_when_confirm_passes(self):
+        from click_confirm import ClickPlan, execute_click_with_confirm
+
+        ref = np.random.default_rng(4).integers(0, 255, (30, 30, 3), dtype=np.uint8)
+        nav = Mock()
+        nav.grab_roi.return_value = ref.copy()
+        plan = ClickPlan(
+            x=15, y=15, roi_ref=ref, template_name="t.png",
+            score=0.99, roi_box=(0, 0, 30, 30),
+        )
+        with patch("click_confirm.time.sleep", return_value=None):
+            assert execute_click_with_confirm(nav, plan) is True
+        nav.click_css.assert_called_once_with(15, 15)
+
 
 class TestCropQrFromBgr:
     """测试 login.crop_qr_from_bgr：检测并裁切二维码区域。"""

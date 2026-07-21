@@ -127,6 +127,36 @@ class Goal:
         if self.back_count <= 0:
             self._next_task()
 
+    def rewind_to_previous_step(self) -> str:
+        """游标回退到上一步，供返回未生效等场景重试。
+
+        优先级：待返回/已截图 → 回到本任务最后一次点击；
+        仍有前置点击 → click_index-1；否则回到上一任务重做。
+        """
+        if getattr(self, "_shot_done", False) or self.backs_done > 0:
+            self._shot_done = False
+            self.backs_done = 0
+            if self.success > 0:
+                self.success -= 1
+            self.click_index = max(0, len(self.clicks) - 1) if self.clicks else 0
+            return f"回退到本任务点击步骤: {self.name}"
+
+        if self.click_index > 0:
+            self.click_index -= 1
+            return f"回退到点击[{self.click_index}]: {self.name}"
+
+        if self.task_index > 0:
+            self.task_index -= 1
+            self.click_index = 0
+            self.backs_done = 0
+            self._shot_done = False
+            return f"回退到上一任务: {self.name}"
+
+        self.click_index = 0
+        self.backs_done = 0
+        self._shot_done = False
+        return f"已在首步，重置: {self.name}"
+
     def _next_task(self) -> None:
         self.task_index += 1
         self.click_index = 0
@@ -302,8 +332,55 @@ class UiLoop:
                 return
         self._log("判为弹窗但未点到关闭按钮", "warn")
 
+    def _popup_pending(self) -> bool:
+        """点击前再截一帧，检测关闭按钮是否出现。"""
+        from ui_state import match_score
+
+        screen = self.nav._get_screenshot()
+        vh, vw = screen.shape[:2]
+        bounds = popup_close_bounds(vw, vh)
+        for tpl in POPUP_CLOSE_TEMPLATES:
+            if match_score(self.nav, tpl, bounds=bounds, screen=screen) >= POPUP_CLOSE_THRESHOLD:
+                return True
+        return False
+
+    def _ensure_clear_for_click(self) -> bool:
+        """有弹窗则关闭并取消本轮主线点击；返回是否可继续点击。"""
+        if self._popup_pending():
+            self._log("点击前检测到弹窗，取消主线动作", "warn")
+            self._close_popup()
+            return False
+        return True
+
+    def _back_verify_template(self) -> str | None:
+        """本次返回若会结束当前任务，用下一任务首个入口模板做生效校验。"""
+        if self.goal.backs_done + 1 < self.goal.back_count:
+            return None
+        next_i = self.goal.task_index + 1
+        if next_i >= len(self.goal.tasks):
+            return None
+        clicks = self.goal.tasks[next_i][1]
+        if not clicks:
+            return None
+        parsed = parse_click_item(clicks[0])
+        if parsed["template"] == "__coords__":
+            return parsed["anchor"] if parsed["anchor"] else None
+        return parsed["template"]
+
+    def _drain_popups_briefly(self, rounds: int = 3) -> None:
+        """返回点击后可能立刻弹窗；先清掉再做生效校验。"""
+        for _ in range(rounds):
+            if self._stopped():
+                return
+            if not self._popup_pending():
+                return
+            self._close_popup()
+            time.sleep(CLICK_INTERVAL)
+
     def _do_click_step(self) -> None:
         if not self.goal.phase_need_click():
+            return
+        if not self._ensure_clear_for_click():
             return
         self._log(f"[{self.goal.task_index + 1}/{self._total}] {self.goal.name}")
         item = self.goal.clicks[self.goal.click_index]
@@ -318,21 +395,37 @@ class UiLoop:
         )
         verify_tpl = effect_verify_template(next_item)
 
+        from click_confirm import (
+            execute_click_with_confirm,
+            plan_coords_click,
+            plan_template_click,
+        )
+
         for attempt in range(1, CLICK_EFFECT_RETRIES + 2):
             if self._stopped():
                 return
-            clicked = False
+            screen = self.nav._get_screenshot()
             if template == "__coords__":
                 x, y = bounds
-                self.nav.click_css(x, y)
-                self._log(f"  坐标点击 ({x}, {y})")
-                time.sleep(CLICK_INTERVAL)
-                clicked = True
+                plan = plan_coords_click(screen, x, y)
+                clicked = execute_click_with_confirm(self.nav, plan)
+                if clicked:
+                    self._log(f"  坐标点击 ({x}, {y})")
             else:
-                clicked = bool(self.nav.find_and_click(template, bounds=bounds))
+                plan = plan_template_click(
+                    self.nav, screen, template, bounds=bounds
+                )
+                if plan is None:
+                    self._log(f"  找不到 {template}", "warn")
+                    return
+                self._log(
+                    f"  计划点击 {template} @ ({plan.x},{plan.y}) "
+                    f"置信度 {plan.score:.2f}"
+                )
+                clicked = execute_click_with_confirm(self.nav, plan)
 
             if not clicked:
-                self._log(f"  找不到 {template}", "warn")
+                self._log(f"  点击已取消（ROI 未确认）: {desc}", "warn")
                 return
 
             if verify_tpl is None:
@@ -364,13 +457,56 @@ class UiLoop:
             self.goal.advance_after_shot_no_back()
 
     def _do_back(self) -> None:
+        """点击返回；Pass2 ROI 确认后才派发；点后再生效校验。"""
+        if not self._ensure_clear_for_click():
+            return
         prev_index = self.goal.task_index
-        if self.nav.find_and_click("back_arrow.png", timeout=3):
-            time.sleep(3)
-            self.goal.advance_after_back()
-            if self.goal.task_index > prev_index:
-                delay = random.uniform(SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX)
-                self._log(f"  等待 {delay:.1f}s...")
-                time.sleep(delay)
-        else:
+        verify_tpl = self._back_verify_template()
+
+        from click_confirm import execute_click_with_confirm, plan_template_click
+
+        screen = self.nav._get_screenshot()
+        plan = plan_template_click(self.nav, screen, "back_arrow.png")
+        if plan is None:
             self._log("  未找到返回箭头", "warn")
+            return
+        self._log(
+            f"  计划返回 @ ({plan.x},{plan.y}) 置信度 {plan.score:.2f}"
+        )
+        if not execute_click_with_confirm(self.nav, plan):
+            self._log("  返回点击已取消（ROI 未确认）", "warn")
+            return
+
+        time.sleep(1.0)
+        self._drain_popups_briefly()
+
+        if verify_tpl:
+            if not self.nav.wait_for_template(verify_tpl, timeout=EFFECT_VERIFY_TIMEOUT):
+                msg = self.goal.rewind_to_previous_step()
+                self._log(
+                    f"  返回未生效（未出现 {verify_tpl}），{msg}",
+                    "warn",
+                )
+                self._recover_toward_current_step()
+                return
+
+        self.goal.advance_after_back()
+        if self.goal.task_index > prev_index:
+            delay = random.uniform(SCREENSHOT_DELAY_MIN, SCREENSHOT_DELAY_MAX)
+            self._log(f"  等待 {delay:.1f}s...")
+            time.sleep(delay)
+
+    def _recover_toward_current_step(self) -> None:
+        """回退游标后，尽量点返回/关弹窗直到当前步骤入口可见。"""
+        path = [
+            t for t in self.goal.path_templates() if t and t.endswith(".png")
+        ]
+        target = path[0] if path else None
+        for _ in range(3):
+            if self._stopped():
+                return
+            self._drain_popups_briefly(rounds=1)
+            if target and self.nav.wait_for_template(target, timeout=2):
+                return
+            self.nav.find_and_click("back_arrow.png", timeout=2)
+            time.sleep(CLICK_INTERVAL)

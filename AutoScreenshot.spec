@@ -1,12 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_all
+
+datas = [('templates', 'templates'), ('calibrated_coords.json', '.')]
+binaries = []
+hiddenimports = ['tkinter', 'tkinter.ttk', 'cv2', 'cv2._core', 'numpy', 'numpy._core', 'PIL', 'PIL.Image', 'PIL.ImageTk', 'selenium', 'selenium.webdriver.chrome.service', 'selenium.webdriver.chrome.options', 'selenium.webdriver.edge.service', 'selenium.webdriver.edge.options', 'webdriver_manager', 'webdriver_manager.chrome', 'webdriver_manager.core.os_manager', 'urllib3', 'requests', 'certifi']
+binaries += collect_dynamic_libs('selenium')
+tmp_ret = collect_all('cv2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('selenium')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[('templates', 'templates'), ('calibrated_coords.json', '.')],
-    hiddenimports=['tkinter', 'tkinter.ttk', 'cv2', 'numpy', 'PIL', 'PIL.Image', 'PIL.ImageTk', 'selenium', 'selenium.webdriver.chrome.service', 'selenium.webdriver.chrome.options', 'selenium.webdriver.edge.service', 'selenium.webdriver.edge.options', 'webdriver_manager', 'webdriver_manager.chrome', 'webdriver_manager.microsoft', 'webdriver_manager.core.os_manager', 'urllib3', 'requests', 'certifi'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -22,7 +33,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='AutoScreenshot.exe',
+    name='AutoScreenshot',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -36,10 +47,3 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
-# BUNDLE() 是 macOS 专用指令，Windows 构建时删除此行
-# app = BUNDLE(
-#     exe,
-#     name='AutoScreenshot.app',
-#     icon=None,
-#     bundle_identifier=None,
-# )
