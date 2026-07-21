@@ -66,13 +66,21 @@ class Navigator:
     def _load_template(self, template_name: str) -> np.ndarray | None:
         """加载模板图片，优先从缓存获取。
 
-        模板是小文件（几十 KB），缓存后避免重复磁盘 I/O
-        和反复分配/释放 numpy 数组。
+        使用 np.fromfile + imdecode，避免 cv2.imread 在含非 ASCII
+        路径（如中文用户名下的 %TEMP%\\_MEI*）上失败。
         """
         path = self._template_path(template_name)
         if path not in self._template_cache:
-            template = cv2.imread(path)
+            if not os.path.isfile(path):
+                return None
+            try:
+                data = np.fromfile(path, dtype=np.uint8)
+                template = cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+            except OSError as e:
+                log.error(f"模板读取异常: {path} ({e})")
+                return None
             if template is None:
+                log.error(f"模板解码失败(路径可能含非ASCII): {path}")
                 return None
             self._template_cache[path] = template
         return self._template_cache[path]
@@ -143,7 +151,7 @@ class Navigator:
         template = self._load_template(template_name)
 
         if template is None:
-            log.error(f"模板文件不存在: {self._template_path(template_name)}")
+            log.error(f"模板文件不存在或无法读取: {self._template_path(template_name)}")
             return False
 
         t_h, t_w = template.shape[:2]
@@ -208,7 +216,7 @@ class Navigator:
         template = self._load_template(template_name)
 
         if template is None:
-            log.error(f"模板文件不存在: {self._template_path(template_name)}")
+            log.error(f"模板文件不存在或无法读取: {self._template_path(template_name)}")
             return False
 
         _threshold = threshold if threshold is not None else self.threshold

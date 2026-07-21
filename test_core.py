@@ -154,6 +154,28 @@ class TestTemplateCache:
         result = nav._load_template("nonexistent.png")
         assert result is None, "不存在的模板应返回 None"
 
+    def test_load_template_unicode_path(self):
+        """含非 ASCII 的路径也应能加载（EXE 解压到中文用户 TEMP 时必需）。"""
+        import shutil
+        import tempfile
+        from navigator import Navigator
+
+        src = os.path.join(resource_path(TEMPLATES_DIR), "game_logout_btn.png")
+        assert os.path.isfile(src), "源模板应存在"
+
+        root = os.path.join(tempfile.gettempdir(), "用户_MEIprobe_test")
+        tpl_dir = os.path.join(root, "templates")
+        os.makedirs(tpl_dir, exist_ok=True)
+        dst = os.path.join(tpl_dir, "game_logout_btn.png")
+        try:
+            shutil.copy2(src, dst)
+            nav = Navigator(driver=Mock(), templates_dir=tpl_dir)
+            template = nav._load_template("game_logout_btn.png")
+            assert template is not None, f"Unicode 路径应能加载: {dst}"
+            assert isinstance(template, np.ndarray)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_cleanup_clears_cache(self):
         """cleanup 应清空模板缓存。"""
         from navigator import Navigator
