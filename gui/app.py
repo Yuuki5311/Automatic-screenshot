@@ -687,6 +687,10 @@ class App(tk.Tk):
                 ("万象图鉴-灵宝", [
                     ("lingbao.png", "点击灵宝"),
                 ], 1),
+                ("按键", [
+                    ("in_game_btn.png", "点击局内按钮"),
+                    ("keybind_btn.png", "点击按键按钮"),
+                ], 1),
                 ("天幕", [
                     ("tianmu.png", "点击天幕"),
                 ], 1),

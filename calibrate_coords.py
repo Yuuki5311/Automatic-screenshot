@@ -68,7 +68,7 @@ TARGETS = [
 
 LEGACY_WARNING = """
 ⚠️  重要：旧桌面/屏幕坐标已作废！
-    截图与点击已统一为浏览器 CSS 视口坐标系（约 1920×1080）。
+    截图与点击已统一为浏览器 CSS 视口坐标系（目标见 config.BROWSER_WIDTH×HEIGHT）。
     请重新采集全部兜底坐标；超出视口的坐标会被拒绝。
 """
 
@@ -120,7 +120,7 @@ def verify_viewport(driver) -> tuple[int, int]:
     if abs(int(inner_w) - BROWSER_WIDTH) > 20 or abs(int(inner_h) - BROWSER_HEIGHT) > 20:
         print(
             f"⚠️  视口尺寸与目标 {BROWSER_WIDTH}×{BROWSER_HEIGHT} 偏差较大，"
-            "请调整窗口或最大化后重试。"
+            "请确认显示器分辨率足够（脚本会尝试锁定视口，不再依赖最大化）。"
         )
     return int(inner_w), int(inner_h)
 

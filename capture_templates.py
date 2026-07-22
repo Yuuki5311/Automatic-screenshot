@@ -60,6 +60,8 @@ TEMPLATES = [
     # ---- 图鉴 ----
     ("universal_illustrated.png", "【万象图鉴】入口", "图鉴页"),
     ("lingbao.png", "【灵宝】入口", "万象图鉴页"),
+    ("in_game_btn.png", "【局内】按钮（需新截取）", "灵宝返回后当前页"),
+    ("keybind_btn.png", "【按键】按钮（需新截取）", "点局内后页面"),
     ("tianmu.png", "【天幕】入口（需新截取）", "万象图鉴页"),
     ("xingyuan.png", "【星元】入口", "万象图鉴页"),
     ("xing_collection.png", "【星典藏】入口", "星元页内"),

@@ -77,12 +77,22 @@ class TestEdgeBrowserStartup:
     """验证 Windows Edge 使用 Selenium Manager 管理驱动。"""
 
     @patch("browser.webdriver.Edge")
-    def test_edge_does_not_use_webdriver_manager(self, mock_edge):
+    @patch("browser.time.sleep", return_value=None)
+    def test_edge_does_not_use_webdriver_manager(self, _sleep, mock_edge):
         """Edge 启动不应访问 webdriver-manager 的微软驱动源。"""
         from browser import _create_edge
 
         driver = Mock()
         mock_edge.return_value = driver
+
+        def _js(script):
+            if "innerWidth" in script:
+                return 1920
+            if "innerHeight" in script:
+                return 1080
+            return None
+
+        driver.execute_script.side_effect = _js
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SE_MSEDGEDRIVER_MIRROR_URL", None)
@@ -92,6 +102,39 @@ class TestEdgeBrowserStartup:
             )
             _, kwargs = mock_edge.call_args
             assert "service" not in kwargs
+            # 不再最大化，改为锁定视口
+            driver.maximize_window.assert_not_called()
+            driver.set_window_size.assert_called()
+
+    @patch("browser.time.sleep", return_value=None)
+    def test_lock_viewport_adjusts_until_target(self, _sleep):
+        from browser import lock_viewport
+
+        driver = Mock()
+        calls = {"n": 0}
+        sequence = [(2500, 1200), (2558, 1290)]
+
+        def _js(script):
+            i = min(calls["n"] // 2, len(sequence) - 1)
+            w, h = sequence[i]
+            if "innerWidth" in script:
+                calls["n"] += 1
+                return w
+            if "innerHeight" in script:
+                calls["n"] += 1
+                return h
+            return None
+
+        driver.execute_script.side_effect = _js
+        iw, ih = lock_viewport(driver, 2558, 1290)
+        assert (iw, ih) == (2558, 1290)
+        assert driver.set_window_size.call_count >= 1
+
+    def test_browser_target_viewport_config(self):
+        import config
+
+        assert config.BROWSER_WIDTH == 2558
+        assert config.BROWSER_HEIGHT == 1290
 
 
 # ========== Navigator Selenium 截图与点击测试 ==========
@@ -654,6 +697,10 @@ class TestScreenshotTasks:
                 ("英雄", [("tab_hero.png", "desc")], 0),
                 ("万象图鉴首页", [("tab_illustrated.png", "desc"), ("universal_illustrated.png", "desc")], 0),
                 ("万象图鉴-灵宝", [("lingbao.png", "desc")], 1),
+                ("按键", [
+                    ("in_game_btn.png", "desc"),
+                    ("keybind_btn.png", "desc"),
+                ], 1),
                 ("天幕", [("tianmu.png", "desc")], 1),
                 ("星典藏", [("xingyuan.png", "desc"), ("xing_collection.png", "desc")], 0),
                 ("星传说", [("xing_legend.png", "desc")], 1),
@@ -683,6 +730,28 @@ class TestScreenshotTasks:
                     template, desc = item[:2]
                 assert isinstance(template, str), f"{name} 模板名无效"
                 assert template.endswith(".png"), f"{name} 模板 {template} 应为 .png"
+
+    def test_anjian_follows_lingbao(self):
+        names = [
+            "主页", "英雄", "万象图鉴首页", "万象图鉴-灵宝", "按键", "天幕",
+        ]
+        # 最小检查：按键紧跟灵宝
+        tasks = [
+            ("万象图鉴-灵宝", [("lingbao.png", "d")], 1),
+            ("按键", [("in_game_btn.png", "d"), ("keybind_btn.png", "d")], 1),
+            ("天幕", [("tianmu.png", "d")], 1),
+        ]
+        assert [t[0] for t in tasks] == ["万象图鉴-灵宝", "按键", "天幕"]
+        assert tasks[1][2] == 1
+        assert [c[0] for c in tasks[1][1]] == ["in_game_btn.png", "keybind_btn.png"]
+
+    def test_expected_anjian_task_tuple(self):
+        task = ("按键", [
+            ("in_game_btn.png", "点击局内按钮"),
+            ("keybind_btn.png", "点击按键按钮"),
+        ], 1)
+        assert task[0] == "按键"
+        assert task[2] == 1
 
 
 # ========== 轻量 FSM：状态分类 ==========

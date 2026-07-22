@@ -91,11 +91,69 @@ window.navigator.permissions.query = (parameters) => (
 """
 
 
+def _read_inner_size(driver) -> tuple[int, int]:
+    """读取页面 CSS 视口 innerWidth × innerHeight。"""
+    iw = driver.execute_script("return window.innerWidth;")
+    ih = driver.execute_script("return window.innerHeight;")
+    if iw is None or ih is None:
+        raise RuntimeError("无法读取 window.innerWidth/innerHeight")
+    return int(iw), int(ih)
+
+
+def lock_viewport(driver, target_w: int, target_h: int, *, tol: int = 2, rounds: int = 6) -> tuple[int, int]:
+    """将浏览器内容区锁定为约 target_w × target_h（CSS 像素）。
+
+    通过反复 set_window_size 补偿标题栏/边框，使 innerWidth/innerHeight 接近目标。
+    不最大化窗口。屏幕过小可能导致无法达到目标，此时记录警告并返回实际视口。
+    """
+    try:
+        driver.set_window_position(0, 0)
+    except Exception:
+        log.debug("set_window_position 失败", exc_info=True)
+
+    # 外框初值：略大于视口，给 chrome 留空
+    outer_w = int(target_w) + 16
+    outer_h = int(target_h) + 140
+
+    iw = ih = 0
+    for i in range(rounds):
+        try:
+            driver.set_window_size(outer_w, outer_h)
+        except Exception:
+            log.warning(f"set_window_size({outer_w}, {outer_h}) 失败", exc_info=True)
+            break
+        time.sleep(0.25)
+        try:
+            iw, ih = _read_inner_size(driver)
+        except Exception:
+            log.warning("读取视口失败", exc_info=True)
+            break
+
+        dw = target_w - iw
+        dh = target_h - ih
+        if abs(dw) <= tol and abs(dh) <= tol:
+            log.info(f"视口已锁定: {iw}x{ih}（目标 {target_w}x{target_h}）")
+            return iw, ih
+
+        outer_w = max(200, outer_w + dw)
+        outer_h = max(200, outer_h + dh)
+        log.debug(
+            f"视口校正 #{i + 1}: inner={iw}x{ih} → 调整外框至 {outer_w}x{outer_h}"
+        )
+
+    log.warning(
+        f"视口未能精确锁定: 实际 {iw}x{ih}，目标 {target_w}x{target_h}。"
+        "请确认显示器分辨率足够（建议不低于目标视口）。"
+    )
+    return iw, ih
+
+
 def _create_chrome(width: int, height: int) -> webdriver.Chrome:
     """macOS: 创建 Chrome 浏览器实例。"""
     options = ChromeOptions()
 
-    options.add_argument(f"--window-size={width},{height}")
+    # 外框初值略大于目标视口；最终由 lock_viewport 校正
+    options.add_argument(f"--window-size={width + 16},{height + 140}")
     options.add_argument("--force-device-scale-factor=1")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -117,18 +175,12 @@ def _create_chrome(width: int, height: int) -> webdriver.Chrome:
         {"source": PRELOAD_SCRIPT},
     )
 
-    driver.maximize_window()
-
-    # macOS: AppleScript 全屏
     subprocess.run([
         "osascript", "-e",
         'tell application "Google Chrome" to activate',
     ], capture_output=True)
-    subprocess.run([
-        "osascript", "-e",
-        'tell application "System Events" to keystroke "f" using {command down, control down}',
-    ], capture_output=True)
 
+    lock_viewport(driver, width, height)
     return driver
 
 
@@ -150,8 +202,7 @@ def _create_edge(width: int, height: int) -> webdriver.Edge:
     """Windows: 创建 Edge 浏览器实例（Chromium 内核，与 Chrome 兼容）。"""
     options = EdgeOptions()
 
-    options.add_argument(f"--window-size={width},{height}")
-    options.add_argument("--start-maximized")
+    options.add_argument(f"--window-size={width + 16},{height + 140}")
     options.add_argument("--force-device-scale-factor=1")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -196,29 +247,32 @@ def _create_edge(width: int, height: int) -> webdriver.Edge:
         {"source": PRELOAD_SCRIPT},
     )
 
-    try:
-        driver.maximize_window()
-    except Exception:
-        log.debug("maximize_window 失败，已使用 --start-maximized", exc_info=True)
-
     _bring_to_front_windows()
+    lock_viewport(driver, width, height)
     return driver
 
 
-def create_browser(width: int = 1920, height: int = 1080):
-    """创建配置了反检测措施的浏览器实例。
+def create_browser(width: int = None, height: int = None):
+    """创建配置了反检测措施的浏览器实例，并锁定 CSS 视口尺寸。
 
     根据当前操作系统自动选择:
         macOS  → Google Chrome
         Windows → Microsoft Edge (系统自带,无需额外安装)
 
     Args:
-        width: 浏览器窗口宽度 (CSS 像素)。
-        height: 浏览器窗口高度 (CSS 像素)。
+        width: 目标视口宽度 (CSS 像素)，默认 config.BROWSER_WIDTH。
+        height: 目标视口高度 (CSS 像素)，默认 config.BROWSER_HEIGHT。
 
     Returns:
         webdriver.Chrome 或 webdriver.Edge 实例。
     """
+    from config import BROWSER_WIDTH, BROWSER_HEIGHT
+
+    if width is None:
+        width = BROWSER_WIDTH
+    if height is None:
+        height = BROWSER_HEIGHT
+
     system = platform.system()
 
     if system == "Windows":
