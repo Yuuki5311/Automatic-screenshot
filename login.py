@@ -405,7 +405,26 @@ def game_login(
 
     if not nav.find_and_click(template_file, timeout=10, bounds=platform_bounds, max_retries=5):
         on_status(f"找不到 {platform_name} 登录按钮 ({template_file})")
-        return False
+        # 可能仍停在已登录会话：有退出则回退预退出环，再重试平台
+        if nav.wait_for_template("game_logout_btn.png", timeout=3):
+            on_status("检测到退出按钮，回退到退出登录步骤...")
+            from ui_loop import run_pre_logout_loop
+
+            pre = run_pre_logout_loop(nav, on_log=lambda text, level="info": on_status(text))
+            if pre.logout_clicked:
+                on_status("已回退退出，重新选择登录平台...")
+            elif pre.timed_out:
+                on_status("回退退出超时，仍尝试选择平台...")
+            time.sleep(2)
+            vw, vh = nav.viewport_size()
+            platform_bounds = platform_select_bounds(vw, vh, platform)
+            if not nav.find_and_click(
+                template_file, timeout=10, bounds=platform_bounds, max_retries=5
+            ):
+                on_status(f"回退后仍找不到 {platform_name} 登录按钮")
+                return False
+        else:
+            return False
 
     on_status(f"已选择 {platform_name} 登录")
 

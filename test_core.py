@@ -402,6 +402,65 @@ class TestPlatformBounds:
         assert first.kwargs["bounds"] == (0, 720, 2560, 720)
 
 
+class TestGameLoginPlatformFallback:
+    """找不到平台按钮时，若退出仍在则回退预退出再重试。"""
+
+    @patch("login.time.sleep", return_value=None)
+    @patch("ui_loop.run_pre_logout_loop")
+    def test_missing_platform_rewinds_logout_then_retries(self, mock_pre, _sleep):
+        from login import game_login
+        from ui_loop import PreLogoutResult
+
+        mock_pre.return_value = PreLogoutResult(
+            logout_clicked=True, confirm_clicked="game_popup_confirm.png", timed_out=False
+        )
+        nav = Mock()
+        nav.viewport_size.return_value = (1920, 1080)
+        platform_hits = {"n": 0}
+
+        def find_and_click(tpl, **kwargs):
+            if tpl == "game_qq_ios.png":
+                platform_hits["n"] += 1
+                return platform_hits["n"] >= 2
+            if tpl == "enter_game.png":
+                return True
+            return False
+
+        nav.find_and_click.side_effect = find_and_click
+
+        def wait_for_template(tpl, **kwargs):
+            if tpl == "game_logout_btn.png":
+                return True
+            if tpl == "avatar.png":
+                return True
+            if tpl == "enter_game.png":
+                return True
+            return False
+
+        nav.wait_for_template.side_effect = wait_for_template
+        statuses = []
+
+        assert game_login(nav, "qq_ios", on_status=statuses.append) is True
+        mock_pre.assert_called_once()
+        assert platform_hits["n"] == 2
+        assert any("退出" in s for s in statuses)
+
+    @patch("login.time.sleep", return_value=None)
+    @patch("ui_loop.run_pre_logout_loop")
+    def test_missing_platform_without_logout_fails(self, mock_pre, _sleep):
+        from login import game_login
+
+        nav = Mock()
+        nav.viewport_size.return_value = (1920, 1080)
+        nav.find_and_click.return_value = False
+        nav.wait_for_template.return_value = False
+        statuses = []
+
+        assert game_login(nav, "qq_ios", on_status=statuses.append) is False
+        mock_pre.assert_not_called()
+        assert any("找不到" in s for s in statuses)
+
+
 # ========== PopupMonitor 安全白名单测试 ==========
 
 class TestPopupSafety:
