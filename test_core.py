@@ -823,23 +823,36 @@ class TestUiClassify:
         )
         assert state == UiState.ON_PATH
 
-    def test_confirm_ignored_by_default(self):
-        from ui_state import UiState, classify_from_scores
+    def test_confirm_templates_count_as_popup(self):
+        """感知环弹窗检测含确认「确定」模板，优先于 MAIN。"""
+        from ui_state import (
+            UiState,
+            classify_from_scores,
+            CONFIRM_THRESHOLD,
+            POPUP_CONFIRM_TEMPLATES,
+        )
 
-        state, _ = classify_from_scores({
-            "game_popup_confirm.png": 0.99,
-            "avatar.png": 0.90,
-        })
-        assert state == UiState.MAIN
+        assert POPUP_CONFIRM_TEMPLATES == (
+            "game_popup_confirm.png",
+            "game_logout_confirm.png",
+        )
+        for tpl in POPUP_CONFIRM_TEMPLATES:
+            state, info = classify_from_scores({
+                tpl: CONFIRM_THRESHOLD,
+                "avatar.png": 0.90,
+            })
+            assert state == UiState.POPUP, tpl
+            assert info["hit"] == "popup_confirm"
 
     def test_confirm_when_allowed(self):
         from ui_state import UiState, classify_from_scores
 
-        state, _ = classify_from_scores(
+        state, info = classify_from_scores(
             {"game_popup_confirm.png": 0.99},
             allow_confirm=True,
         )
         assert state == UiState.CONFIRM
+        assert info["hit"] == "confirm"
 
     def test_unknown_when_all_low(self):
         from ui_state import UiState, classify_from_scores
@@ -981,6 +994,147 @@ class TestUiDecide:
         g = Goal([("万象图鉴-灵宝", [("lingbao.png", "d")], 1)])
         g.click_index = 1
         assert decide(UiState.POPUP, g) == Action.CLOSE_POPUP
+
+
+class TestPreLogoutLoop:
+    """云游戏打开后 → 点登录页退出 的预退出感知环。"""
+
+    def test_closes_popup_before_logout(self):
+        from ui_state import UiState
+        from ui_loop import run_pre_logout_loop, PreLogoutResult
+
+        calls = []
+        states = iter([UiState.POPUP, UiState.UNKNOWN, UiState.UNKNOWN])
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False, screen=None):
+            try:
+                return next(states), {}
+            except StopIteration:
+                return UiState.UNKNOWN, {}
+
+        def fake_close(nav, on_log=None):
+            calls.append("close")
+            return "popup_close.png"
+
+        nav = Mock()
+
+        def fake_find(template, **kwargs):
+            calls.append(("click", template))
+            return template == "game_logout_btn.png"
+
+        nav.find_and_click.side_effect = fake_find
+
+        result = run_pre_logout_loop(
+            nav,
+            timeout_s=5.0,
+            tick_s=0.01,
+            confirm_wait_s=0.05,
+            classify_fn=fake_classify,
+            close_popup_fn=fake_close,
+        )
+        assert isinstance(result, PreLogoutResult)
+        assert result.logout_clicked is True
+        assert calls[0] == "close"
+        assert ("click", "game_logout_btn.png") in calls
+
+    def test_logout_then_confirm_ends(self):
+        from ui_state import UiState
+        from ui_loop import run_pre_logout_loop
+
+        # UNKNOWN → click logout; then POPUP confirm → end
+        phase = {"n": 0}
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False, screen=None):
+            phase["n"] += 1
+            if phase["n"] == 1:
+                return UiState.UNKNOWN, {}
+            return UiState.POPUP, {}
+
+        def fake_close(nav, on_log=None):
+            return "game_popup_confirm.png"
+
+        nav = Mock()
+        nav.find_and_click.return_value = True
+
+        result = run_pre_logout_loop(
+            nav,
+            timeout_s=5.0,
+            tick_s=0.01,
+            confirm_wait_s=2.0,
+            classify_fn=fake_classify,
+            close_popup_fn=fake_close,
+        )
+        assert result.logout_clicked is True
+        assert result.confirm_clicked == "game_popup_confirm.png"
+        assert result.timed_out is False
+
+    def test_logout_without_confirm_ends_after_wait(self):
+        from ui_state import UiState
+        from ui_loop import run_pre_logout_loop
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False, screen=None):
+            return UiState.UNKNOWN, {}
+
+        nav = Mock()
+        nav.find_and_click.return_value = True
+
+        result = run_pre_logout_loop(
+            nav,
+            timeout_s=5.0,
+            tick_s=0.01,
+            confirm_wait_s=0.05,
+            classify_fn=fake_classify,
+            close_popup_fn=lambda *a, **k: None,
+        )
+        assert result.logout_clicked is True
+        assert result.confirm_clicked is None
+        assert result.timed_out is False
+
+    def test_timeout_without_logout(self):
+        from ui_state import UiState
+        from ui_loop import run_pre_logout_loop
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False, screen=None):
+            return UiState.UNKNOWN, {}
+
+        nav = Mock()
+        nav.find_and_click.return_value = False
+
+        result = run_pre_logout_loop(
+            nav,
+            timeout_s=0.15,
+            tick_s=0.05,
+            confirm_wait_s=1.0,
+            classify_fn=fake_classify,
+            close_popup_fn=lambda *a, **k: None,
+        )
+        assert result.logout_clicked is False
+        assert result.timed_out is True
+
+    def test_stop_event_aborts(self):
+        import threading
+        from ui_state import UiState
+        from ui_loop import run_pre_logout_loop
+
+        stop = threading.Event()
+        stop.set()
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False, screen=None):
+            return UiState.UNKNOWN, {}
+
+        nav = Mock()
+        nav.find_and_click.return_value = False
+
+        result = run_pre_logout_loop(
+            nav,
+            stop_event=stop,
+            timeout_s=5.0,
+            tick_s=0.01,
+            classify_fn=fake_classify,
+            close_popup_fn=lambda *a, **k: None,
+        )
+        assert result.logout_clicked is False
+        assert result.timed_out is False
 
 
 class TestUiLoopRun:

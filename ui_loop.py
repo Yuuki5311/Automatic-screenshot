@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import time
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
 
@@ -13,6 +14,8 @@ from screenshot_click import effect_verify_template, parse_click_item
 from ui_state import (
     POPUP_CLOSE_TEMPLATES,
     POPUP_CLOSE_THRESHOLD,
+    POPUP_CONFIRM_TEMPLATES,
+    CONFIRM_THRESHOLD,
     UiState,
     classify,
     popup_close_bounds,
@@ -23,6 +26,140 @@ log = get_logger()
 UNKNOWN_TIMEOUT_S = 45.0
 CLICK_EFFECT_RETRIES = 2
 EFFECT_VERIFY_TIMEOUT = 5
+PRE_LOGOUT_BTN = "game_logout_btn.png"
+
+
+@dataclass
+class PreLogoutResult:
+    """预退出感知环结果。"""
+
+    logout_clicked: bool = False
+    confirm_clicked: str | None = None
+    timed_out: bool = False
+
+
+def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None) -> str | None:
+    """关闭 X 或确认「确定」；返回点中的模板名，未点到返回 None。"""
+    from login import bottom_half_bounds
+
+    def _emit(text: str, level: str = "info") -> None:
+        if on_log:
+            on_log(text, level)
+        if level == "warn":
+            log.warning(text)
+        else:
+            log.info(text)
+
+    vw, vh = nav.viewport_size()
+    bounds = popup_close_bounds(vw, vh)
+    for tpl in POPUP_CLOSE_TEMPLATES:
+        if nav.find_and_click(
+            tpl,
+            timeout=2,
+            bounds=bounds,
+            threshold=POPUP_CLOSE_THRESHOLD,
+            allow_fallback=False,
+        ):
+            _emit(f"已关闭弹窗 ({tpl})", "success")
+            time.sleep(CLICK_INTERVAL)
+            return tpl
+
+    confirm_bounds = bottom_half_bounds(vw, vh)
+    for tpl in POPUP_CONFIRM_TEMPLATES:
+        if nav.find_and_click(
+            tpl,
+            timeout=2,
+            bounds=confirm_bounds,
+            threshold=CONFIRM_THRESHOLD,
+            allow_fallback=False,
+        ):
+            _emit(f"已点击确认弹窗 ({tpl})", "success")
+            time.sleep(CLICK_INTERVAL)
+            return tpl
+    _emit("判为弹窗但未点到关闭/确认按钮", "warn")
+    return None
+
+
+def run_pre_logout_loop(
+    nav,
+    *,
+    stop_event=None,
+    on_log: Callable[[str, str], None] | None = None,
+    timeout_s: float = 120.0,
+    tick_s: float = 0.5,
+    confirm_wait_s: float = 5.0,
+    classify_fn=None,
+    close_popup_fn=None,
+) -> PreLogoutResult:
+    """云游戏打开后：弹窗优先，再点登录页退出并确认。
+
+    超时未点到退出时 timed_out=True，调用方应继续阶段 3。
+    """
+    classify_fn = classify_fn or classify
+    close_popup_fn = close_popup_fn or (
+        lambda n, on_log=None: close_perception_popup(n, on_log=on_log)
+    )
+
+    def _emit(text: str, level: str = "info") -> None:
+        if on_log:
+            on_log(text, level)
+        if level == "error":
+            log.error(text)
+        elif level == "warn":
+            log.warning(text)
+        else:
+            log.info(text)
+
+    def _stopped() -> bool:
+        return bool(stop_event is not None and stop_event.is_set())
+
+    _emit("预退出感知环启动（云游戏 → 登录页退出）")
+    deadline = time.time() + max(0.0, float(timeout_s))
+    logout_clicked = False
+    confirm_clicked: str | None = None
+    post_logout_since: float | None = None
+
+    while not _stopped():
+        now = time.time()
+        if now >= deadline:
+            if logout_clicked:
+                _emit("预退出感知环结束（已退出，确认等待截止）", "success")
+                return PreLogoutResult(True, confirm_clicked, False)
+            _emit("预退出感知环超时：未点到退出按钮", "warn")
+            return PreLogoutResult(False, confirm_clicked, True)
+
+        if logout_clicked and post_logout_since is not None:
+            if now - post_logout_since >= confirm_wait_s:
+                _emit("预退出感知环结束（已退出，无确认或已超时）", "success")
+                return PreLogoutResult(True, confirm_clicked, False)
+
+        state, _info = classify_fn(nav)
+        if state in (UiState.POPUP, UiState.CONFIRM):
+            hit = close_popup_fn(nav, on_log=on_log)
+            if logout_clicked and hit in POPUP_CONFIRM_TEMPLATES:
+                confirm_clicked = hit
+                _emit(f"预退出感知环结束（退出并确认: {hit}）", "success")
+                return PreLogoutResult(True, confirm_clicked, False)
+            time.sleep(tick_s)
+            continue
+
+        if not logout_clicked:
+            if nav.find_and_click(
+                PRE_LOGOUT_BTN,
+                timeout=2,
+                max_retries=2,
+                allow_fallback=False,
+            ):
+                logout_clicked = True
+                post_logout_since = time.time()
+                _emit("已点击退出登录", "success")
+            time.sleep(tick_s)
+            continue
+
+        time.sleep(tick_s)
+
+    _emit("预退出感知环已停止", "warn")
+    return PreLogoutResult(logout_clicked, confirm_clicked, False)
 
 
 class Action(Enum):
@@ -192,6 +329,9 @@ def decide(state: UiState, goal: Goal) -> Action:
     if state == UiState.POPUP:
         return Action.CLOSE_POPUP
 
+    if state == UiState.CONFIRM:
+        return Action.CLOSE_POPUP
+
     if state == UiState.LOGIN:
         return Action.RELOGIN
 
@@ -317,23 +457,13 @@ class UiLoop:
         return self.goal.success
 
     def _close_popup(self) -> None:
-        vw, vh = self.nav.viewport_size()
-        bounds = popup_close_bounds(vw, vh)
-        for tpl in POPUP_CLOSE_TEMPLATES:
-            if self.nav.find_and_click(
-                tpl,
-                timeout=2,
-                bounds=bounds,
-                threshold=POPUP_CLOSE_THRESHOLD,
-                allow_fallback=False,
-            ):
-                self._log(f"已关闭弹窗 ({tpl})", "success")
-                time.sleep(CLICK_INTERVAL)
-                return
-        self._log("判为弹窗但未点到关闭按钮", "warn")
+        hit = close_perception_popup(self.nav, on_log=self.on_log)
+        if hit is None:
+            pass
 
     def _popup_pending(self) -> bool:
-        """点击前再截一帧，检测关闭按钮是否出现。"""
+        """点击前再截一帧，检测关闭或确认按钮是否出现。"""
+        from login import bottom_half_bounds
         from ui_state import match_score
 
         screen = self.nav._get_screenshot()
@@ -341,6 +471,10 @@ class UiLoop:
         bounds = popup_close_bounds(vw, vh)
         for tpl in POPUP_CLOSE_TEMPLATES:
             if match_score(self.nav, tpl, bounds=bounds, screen=screen) >= POPUP_CLOSE_THRESHOLD:
+                return True
+        confirm_bounds = bottom_half_bounds(vw, vh)
+        for tpl in POPUP_CONFIRM_TEMPLATES:
+            if match_score(self.nav, tpl, bounds=confirm_bounds, screen=screen) >= CONFIRM_THRESHOLD:
                 return True
         return False
 

@@ -15,6 +15,11 @@ POPUP_CLOSE_TEMPLATES = (
     "popup_close.png",
     "popup_close_small.png",
 )
+# 确认类弹窗「确定」（下半屏）；感知环默认当作弹窗关闭
+POPUP_CONFIRM_TEMPLATES = (
+    "game_popup_confirm.png",
+    "game_logout_confirm.png",
+)
 
 LOGIN_TEMPLATES = (
     "game_wx_ios.png",
@@ -73,7 +78,8 @@ def classify_from_scores(
 ) -> tuple[UiState, dict[str, Any]]:
     """根据模板置信度字典按优先级判定状态。
 
-    优先级：POPUP > LOGIN（且需达较高阈值）> CONFIRM(可选) > ON_PATH > MAIN > UNKNOWN。
+    优先级：POPUP(X关闭) > POPUP(确认确定，默认) / CONFIRM(allow_confirm)
+    > LOGIN > ON_PATH > MAIN > UNKNOWN。
     """
     path_templates = path_templates or []
     info: dict[str, Any] = {"scores": dict(scores)}
@@ -83,18 +89,22 @@ def classify_from_scores(
         info["hit"] = "popup"
         return UiState.POPUP, info
 
+    confirm_score = _best(scores, POPUP_CONFIRM_TEMPLATES)
+    if confirm_score < 0:
+        confirm_score = scores.get(CONFIRM_TEMPLATE, -1.0)
+    if confirm_score >= CONFIRM_THRESHOLD:
+        if allow_confirm:
+            info["hit"] = "confirm"
+            return UiState.CONFIRM, info
+        info["hit"] = "popup_confirm"
+        return UiState.POPUP, info
+
     login_score = _best(scores, LOGIN_TEMPLATES)
     main_score = scores.get(MAIN_TEMPLATE, -1.0)
     # 已有头像说明在局内，即使平台模板误匹配也不判 LOGIN
     if login_score >= LOGIN_THRESHOLD and main_score < MAIN_THRESHOLD:
         info["hit"] = "login"
         return UiState.LOGIN, info
-
-    if allow_confirm:
-        confirm_score = scores.get(CONFIRM_TEMPLATE, -1.0)
-        if confirm_score >= CONFIRM_THRESHOLD:
-            info["hit"] = "confirm"
-            return UiState.CONFIRM, info
 
     path_score = _best(scores, path_templates) if path_templates else -1.0
     if path_templates and path_score >= PATH_THRESHOLD:
@@ -164,6 +174,12 @@ def classify(
     for tpl in POPUP_CLOSE_TEMPLATES:
         scores[tpl] = match_score(nav, tpl, bounds=popup_bounds, screen=screen)
 
+    from login import bottom_half_bounds
+
+    confirm_bounds = bottom_half_bounds(vw, vh)
+    for tpl in POPUP_CONFIRM_TEMPLATES:
+        scores[tpl] = match_score(nav, tpl, bounds=confirm_bounds, screen=screen)
+
     for tpl in LOGIN_TEMPLATES:
         scores[tpl] = match_score(nav, tpl, screen=screen)
 
@@ -175,16 +191,6 @@ def classify(
         if tpl == "__coords__":
             continue
         scores[tpl] = match_score(nav, tpl, screen=screen)
-
-    if allow_confirm:
-        from login import bottom_half_bounds
-
-        scores[CONFIRM_TEMPLATE] = match_score(
-            nav,
-            CONFIRM_TEMPLATE,
-            bounds=bottom_half_bounds(vw, vh),
-            screen=screen,
-        )
 
     state, info = classify_from_scores(
         scores, path_templates=path_templates, allow_confirm=allow_confirm

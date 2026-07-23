@@ -366,7 +366,7 @@ class App(tk.Tk):
             from navigator import Navigator
             from screenshotter import Screenshotter
             from popup_monitor import PopupMonitor
-            from ui_loop import UiLoop
+            from ui_loop import UiLoop, run_pre_logout_loop
             _log.info("工作流模块就绪")
 
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -452,7 +452,7 @@ class App(tk.Tk):
 
                 self._send({"type": "log", "text": "✅ 已切换到云游戏标签页", "level": "success"})
 
-                # ---- 清除游戏启动后的弹窗（仅首次） ----
+                # ---- 粗清初始弹窗 + 预退出感知环（弹窗优先 → 点退出 → 确认） ----
                 self._send({"type": "log", "text": "等待 10 秒后清除初始弹窗..."})
                 time.sleep(10)
                 _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
@@ -460,44 +460,30 @@ class App(tk.Tk):
                 _nav.click_css(vw // 2, int(vh * 0.85))
                 self._send({"type": "log", "text": "已尝试清除弹窗"})
 
-                # ---- 3a. 退出当前登录（仅首次，防止自动登录残留） ----
-                self._send({"type": "log", "text": "等待游戏窗口..."})
-                time.sleep(2)
-                monitor = PopupMonitor(navigator=_nav)
-
-                # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 冷却等待
-                monitor.close_all_popups()
-                time.sleep(3)
-                monitor.close_all_popups()
-                monitor.wait_until_clear(3)
-
-                # 有退出按钮 → 退出并确认；无退出按钮 → 处理云服务器确认弹窗
-                LOGOUT_BTN_RETRIES = 2
-                LOGOUT_BTN_WAIT = 30
-                logout_btn_found = False
-                for logout_try in range(1, LOGOUT_BTN_RETRIES + 1):
-                    if _nav.find_and_click("game_logout_btn.png", timeout=5, max_retries=3):
-                        logout_btn_found = True
-                        break
-                    if logout_try < LOGOUT_BTN_RETRIES:
-                        self._send({"type": "log", "text": f"未检测到退出按钮，{LOGOUT_BTN_WAIT}s后重试 ({logout_try}/{LOGOUT_BTN_RETRIES})...", "level": "warn"})
-                        time.sleep(LOGOUT_BTN_WAIT)
-
-                if logout_btn_found:
-                    self._send({"type": "log", "text": "已点击退出登录"})
-                    hit = click_confirm_dialog(_nav, wait_after=3.0)
-                    if hit:
-                        self._send({"type": "log", "text": f"已确认退出登录（{hit}）"})
-                    else:
-                        self._send({"type": "log", "text": "未找到退出确认按钮", "level": "warn"})
-                else:
-                    self._send({"type": "log", "text": "未检测到退出按钮，检查云服务器确认弹窗...", "level": "warn"})
-                    hit = click_confirm_dialog(_nav, wait_after=1.0)
-                    if hit:
-                        self._send({"type": "log", "text": f"已点击云服务器确认弹窗（{hit}）"})
-                    else:
-                        self._send({"type": "log", "text": "未发现确认弹窗，继续游戏登录", "level": "info"})
-
+                self._send({"type": "log", "text": "启动预退出感知环..."})
+                pre = run_pre_logout_loop(
+                    _nav,
+                    stop_event=self._stop_event,
+                    on_log=lambda text, level="info": self._send(
+                        {"type": "log", "text": text, "level": level}
+                    ),
+                )
+                if pre.logout_clicked:
+                    self._send({
+                        "type": "log",
+                        "text": (
+                            f"预退出完成（确认: {pre.confirm_clicked}）"
+                            if pre.confirm_clicked
+                            else "预退出完成（未检测到确认弹窗）"
+                        ),
+                        "level": "success",
+                    })
+                elif pre.timed_out:
+                    self._send({
+                        "type": "log",
+                        "text": "预退出超时未点到退出，继续游戏登录",
+                        "level": "warn",
+                    })
                 monitor = None
 
             elif self._is_rerun:
@@ -515,41 +501,31 @@ class App(tk.Tk):
 
                 self._send({"type": "log", "text": "正在退出当前游戏登录...", "level": "info"})
                 _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
-                monitor = PopupMonitor(navigator=_nav)
 
-                # 同步清理弹窗 → 等3s → 再次确认无弹窗 → 冷却等待
-                monitor.close_all_popups()
-                time.sleep(3)
-                monitor.close_all_popups()
-                monitor.wait_until_clear(3)
-
-                # 有退出按钮 → 退出并确认；无退出按钮 → 处理云服务器确认弹窗
-                LOGOUT_BTN_RETRIES = 2
-                LOGOUT_BTN_WAIT = 30
-                logout_btn_found = False
-                for logout_try in range(1, LOGOUT_BTN_RETRIES + 1):
-                    if _nav.find_and_click("game_logout_btn.png", timeout=5, max_retries=3):
-                        logout_btn_found = True
-                        break
-                    if logout_try < LOGOUT_BTN_RETRIES:
-                        self._send({"type": "log", "text": f"未检测到退出按钮，{LOGOUT_BTN_WAIT}s后重试 ({logout_try}/{LOGOUT_BTN_RETRIES})...", "level": "warn"})
-                        time.sleep(LOGOUT_BTN_WAIT)
-
-                if logout_btn_found:
-                    self._send({"type": "log", "text": "已点击退出登录"})
-                    hit = click_confirm_dialog(_nav, wait_after=3.0)
-                    if hit:
-                        self._send({"type": "log", "text": f"已确认退出登录（{hit}）"})
-                    else:
-                        self._send({"type": "log", "text": "未找到退出确认按钮", "level": "warn"})
-                else:
-                    self._send({"type": "log", "text": "未检测到退出按钮，检查云服务器确认弹窗...", "level": "warn"})
-                    hit = click_confirm_dialog(_nav, wait_after=1.0)
-                    if hit:
-                        self._send({"type": "log", "text": f"已点击云服务器确认弹窗（{hit}）"})
-                    else:
-                        self._send({"type": "log", "text": "未发现确认弹窗，继续游戏登录", "level": "info"})
-
+                self._send({"type": "log", "text": "启动预退出感知环..."})
+                pre = run_pre_logout_loop(
+                    _nav,
+                    stop_event=self._stop_event,
+                    on_log=lambda text, level="info": self._send(
+                        {"type": "log", "text": text, "level": level}
+                    ),
+                )
+                if pre.logout_clicked:
+                    self._send({
+                        "type": "log",
+                        "text": (
+                            f"预退出完成（确认: {pre.confirm_clicked}）"
+                            if pre.confirm_clicked
+                            else "预退出完成（未检测到确认弹窗）"
+                        ),
+                        "level": "success",
+                    })
+                elif pre.timed_out:
+                    self._send({
+                        "type": "log",
+                        "text": "预退出超时未点到退出，继续游戏登录",
+                        "level": "warn",
+                    })
                 monitor = None
 
             # ====== 阶段 3: 游戏内登录 + 截图 ======
