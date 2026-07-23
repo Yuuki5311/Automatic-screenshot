@@ -112,7 +112,7 @@ class TestEdgeBrowserStartup:
 
         driver = Mock()
         calls = {"n": 0}
-        sequence = [(2500, 1200), (2558, 1290)]
+        sequence = [(1800, 1000), (1920, 1080)]
 
         def _js(script):
             i = min(calls["n"] // 2, len(sequence) - 1)
@@ -126,15 +126,15 @@ class TestEdgeBrowserStartup:
             return None
 
         driver.execute_script.side_effect = _js
-        iw, ih = lock_viewport(driver, 2558, 1290)
-        assert (iw, ih) == (2558, 1290)
+        iw, ih = lock_viewport(driver, 1920, 1080)
+        assert (iw, ih) == (1920, 1080)
         assert driver.set_window_size.call_count >= 1
 
     def test_browser_target_viewport_config(self):
         import config
 
-        assert config.BROWSER_WIDTH == 2558
-        assert config.BROWSER_HEIGHT == 1290
+        assert config.BROWSER_WIDTH == 1920
+        assert config.BROWSER_HEIGHT == 1080
 
 
 # ========== Navigator Selenium 截图与点击测试 ==========

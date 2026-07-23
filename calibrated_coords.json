@@ -36,8 +36,8 @@
     875
   ],
   "avatar": [
-    659,
-    147
+    504,
+    153
   ],
   "nobility_icon": [
     1971,
@@ -96,8 +96,8 @@
     279
   ],
   "minion": [
-    2371,
-    349
+    1795,
+    318
   ],
   "personal_customize": [
     699,
@@ -110,5 +110,33 @@
   "settings_logout": [
     2255,
     1028
+  ],
+  "skin_treasure_wushuang": [
+    504,
+    153
+  ],
+  "skin_glory_collection": [
+    504,
+    153
+  ],
+  "skin_wushuang": [
+    504,
+    153
+  ],
+  "skin_treasure_legend": [
+    504,
+    153
+  ],
+  "skin_legend": [
+    504,
+    153
+  ],
+  "bag": [
+    504,
+    153
+  ],
+  "currency_bag": [
+    504,
+    153
   ]
 }
