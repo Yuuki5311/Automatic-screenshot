@@ -1,15 +1,13 @@
 """游戏内导航模块 —— 基于 OpenCV 模板匹配 + Selenium 浏览器点击。
 
 在浏览器游戏画面中定位按钮并点击。
-使用 Selenium 截取浏览器视口并模拟 CSS 坐标点击。
+使用 Selenium 截取浏览器视口，经 CDP 注入 CSS 坐标点击。
 """
 
 import os
 import time
 import cv2
 import numpy as np
-
-from selenium.webdriver.common.actions.action_builder import ActionBuilder
 
 from config import MATCH_THRESHOLD, MAX_RETRIES, RETRY_INTERVAL, CLICK_INTERVAL, resource_path
 from logger import get_logger
@@ -90,11 +88,34 @@ class Navigator:
         return (int(x / self._scale), int(y / self._scale))
 
     def click_css(self, x: int, y: int) -> None:
-        """在浏览器视口 CSS 坐标 (x, y) 处点击。"""
-        actions = ActionBuilder(self.driver)
-        actions.pointer_action.move_to_location(int(x), int(y))
-        actions.pointer_action.click()
-        actions.perform()
+        """在浏览器视口 CSS 坐标 (x, y) 处点击（CDP 注入，减少系统光标拖动）。"""
+        x_i, y_i = int(x), int(y)
+        self.driver.execute_cdp_cmd(
+            "Input.dispatchMouseEvent",
+            {"type": "mouseMoved", "x": x_i, "y": y_i},
+        )
+        self.driver.execute_cdp_cmd(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mousePressed",
+                "x": x_i,
+                "y": y_i,
+                "button": "left",
+                "buttons": 1,
+                "clickCount": 1,
+            },
+        )
+        self.driver.execute_cdp_cmd(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mouseReleased",
+                "x": x_i,
+                "y": y_i,
+                "button": "left",
+                "buttons": 0,
+                "clickCount": 1,
+            },
+        )
 
     def grab_roi(self, x: int, y: int, w: int, h: int) -> np.ndarray:
         """截取视口后裁切 ROI（P0：全图再裁；后续可换 CDP clip）。"""

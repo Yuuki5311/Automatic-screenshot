@@ -149,23 +149,31 @@ class TestNavigatorSelenium:
             assert nav._scale == 1.0
             mock_shot.assert_not_called()
 
-    @patch("navigator.ActionBuilder")
-    def test_click_css_uses_action_builder(self, mock_ab):
+    def test_click_css_uses_cdp_mouse_events(self):
         from navigator import Navigator
 
         driver = Mock()
-        builder = mock_ab.return_value
-        builder.pointer_action.move_to_location.return_value = builder.pointer_action
-        builder.pointer_action.click.return_value = builder.pointer_action
-        builder.perform.return_value = None
         nav = Navigator.__new__(Navigator)
         nav.driver = driver
         nav._scale = 1.0
         nav.click_css(100, 200)
-        mock_ab.assert_called_once_with(driver)
-        builder.pointer_action.move_to_location.assert_called_once_with(100, 200)
-        builder.pointer_action.click.assert_called_once()
-        builder.perform.assert_called_once()
+
+        assert driver.execute_cdp_cmd.call_count == 3
+        moved, pressed, released = driver.execute_cdp_cmd.call_args_list
+        assert moved.args[0] == "Input.dispatchMouseEvent"
+        assert moved.args[1]["type"] == "mouseMoved"
+        assert moved.args[1]["x"] == 100
+        assert moved.args[1]["y"] == 200
+        assert pressed.args[0] == "Input.dispatchMouseEvent"
+        assert pressed.args[1]["type"] == "mousePressed"
+        assert pressed.args[1]["x"] == 100
+        assert pressed.args[1]["y"] == 200
+        assert pressed.args[1]["button"] == "left"
+        assert pressed.args[1]["clickCount"] == 1
+        assert released.args[0] == "Input.dispatchMouseEvent"
+        assert released.args[1]["type"] == "mouseReleased"
+        assert released.args[1]["x"] == 100
+        assert released.args[1]["y"] == 200
 
 
 # ========== Navigator 模板缓存测试 ==========
