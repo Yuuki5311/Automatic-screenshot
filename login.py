@@ -23,6 +23,7 @@ from selenium.common.exceptions import NoSuchElementException
 
 from config import BROWSER_WIDTH, BROWSER_HEIGHT, CLOUD_GAMING_URL, PAGE_LOAD_WAIT
 from logger import get_logger
+from navigator import capture_viewport_bgr
 
 log = get_logger()
 
@@ -82,7 +83,7 @@ def crop_qr_from_bgr(frame_bgr: np.ndarray) -> Image.Image | None:
 
 # 退出/云服务器确认：画面上可能是「确定」或「同意」
 CONFIRM_TEMPLATES = ("game_popup_confirm.png", "game_logout_confirm.png")
-CONFIRM_THRESHOLD = 0.48  # 云游戏压缩下 0.53 易差一点点失败（曾见 0.513）
+CONFIRM_THRESHOLD = 0.60  # 避免皮肤/背包页等误匹配「确定」（曾 0.48～0.57 误点）
 
 
 def click_confirm_dialog(nav, *, wait_after: float = 3.0) -> str | None:
@@ -235,10 +236,7 @@ def web_login(
             return
         try:
             driver.switch_to.default_content()
-            png = driver.get_screenshot_as_png()
-            frame_bgr = cv2.imdecode(
-                np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
-            )
+            frame_bgr = capture_viewport_bgr(driver)
             image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
             if image is not None:
                 on_qr(image)
@@ -354,6 +352,20 @@ PLATFORM_TEMPLATES = {
     "qq_android": "game_qq_android.png",
 }
 
+# 扫码出现后，过一会儿再判定「是否回到平台页」（给扫码留时间）
+POST_QR_PLATFORM_GRACE_S = 8.0
+# 再点一次平台后，若仍停在平台页则快速失败（勿空等满 timeout）
+POST_QR_PLATFORM_STUCK_S = 20.0
+
+
+def platform_template_visible(nav, template_file: str, bounds=None, threshold: float | None = None) -> bool:
+    """当前帧是否仍能看到指定平台按钮（用于扫码后回到平台页检测）。"""
+    from config import MATCH_THRESHOLD
+    from ui_state import match_score
+
+    th = MATCH_THRESHOLD if threshold is None else threshold
+    return match_score(nav, template_file, bounds=bounds) >= th
+
 
 def game_login(
     nav,  # Navigator 实例
@@ -441,10 +453,13 @@ def game_login(
 
     start = time.time()
     qr_appeared = False
+    qr_appeared_at: float | None = None
     last_qr_push = 0.0
     QR_CODE_TIMEOUT = 15  # 15 秒内必须出现二维码
 
     avatar_detected_at = None  # 头像出现时间（用于快速重试）
+    platform_reclicked_after_qr = False
+    platform_reclicked_at: float | None = None
 
     while time.time() - start < timeout:
         # ---- 检测登录成功 ----
@@ -470,17 +485,43 @@ def game_login(
             on_status("⚠️ 登录成功但未找到进入游戏按钮，将重试平台选择")
             return False
 
+        # ---- 扫码后若二维码消失又回到平台页：再点一次平台（授权后常见） ----
+        if (
+            qr_appeared
+            and qr_appeared_at is not None
+            and time.time() - qr_appeared_at >= POST_QR_PLATFORM_GRACE_S
+        ):
+            if platform_template_visible(nav, template_file, bounds=platform_bounds):
+                if not platform_reclicked_after_qr:
+                    on_status("⚠️ 扫码后回到平台选择，重新点击平台...")
+                    if nav.find_and_click(
+                        template_file,
+                        timeout=5,
+                        bounds=platform_bounds,
+                        max_retries=3,
+                    ):
+                        platform_reclicked_after_qr = True
+                        platform_reclicked_at = time.time()
+                        on_status(f"已再次点击 {platform_name}")
+                        time.sleep(2)
+                        continue
+                    on_status("⚠️ 扫码后无法再次点击平台，将重试")
+                    return False
+                if (
+                    platform_reclicked_at is not None
+                    and time.time() - platform_reclicked_at >= POST_QR_PLATFORM_STUCK_S
+                ):
+                    on_status("⚠️ 扫码后仍停在平台选择，将重试")
+                    return False
+
         # ---- 检测 / 刷新二维码 ----
         if not qr_appeared:
             try:
-                png = nav.driver.get_screenshot_as_png()
-                frame_bgr = cv2.imdecode(
-                    np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
-                )
-                del png
+                frame_bgr = capture_viewport_bgr(nav.driver)
                 image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
                 if image is not None:
                     qr_appeared = True
+                    qr_appeared_at = time.time()
                     if on_qr:
                         on_qr(image)
                     last_qr_push = time.time()
@@ -494,17 +535,16 @@ def game_login(
                 on_status("⚠️ 未检测到登录二维码，将重试")
                 return False
         elif on_qr and time.time() - last_qr_push >= 8:
-            try:
-                png = nav.driver.get_screenshot_as_png()
-                frame_bgr = cv2.imdecode(
-                    np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR
-                )
-                image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
-                if image is not None:
-                    on_qr(image)
-                    last_qr_push = time.time()
-            except Exception:
-                log.debug("刷新游戏二维码失败", exc_info=True)
+            # 已回到平台页则不必再推旧码到 GUI
+            if not platform_template_visible(nav, template_file, bounds=platform_bounds):
+                try:
+                    frame_bgr = capture_viewport_bgr(nav.driver)
+                    image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
+                    if image is not None:
+                        on_qr(image)
+                        last_qr_push = time.time()
+                except Exception:
+                    log.debug("刷新游戏二维码失败", exc_info=True)
 
         time.sleep(2)
 

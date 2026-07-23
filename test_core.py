@@ -175,6 +175,33 @@ class TestNavigatorSelenium:
         assert released.args[1]["x"] == 100
         assert released.args[1]["y"] == 200
 
+    def test_get_screenshot_uses_cdp_jpeg(self):
+        """感知/匹配用截屏走 CDP JPEG，减轻云游戏 tab 压力。"""
+        import base64
+        from navigator import Navigator
+
+        bgr = np.zeros((24, 32, 3), dtype=np.uint8)
+        bgr[:] = (10, 20, 30)
+        ok, enc = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        assert ok
+        driver = Mock()
+        driver.execute_cdp_cmd.return_value = {
+            "data": base64.b64encode(enc.tobytes()).decode("ascii"),
+        }
+        nav = Navigator.__new__(Navigator)
+        nav.driver = driver
+
+        out = nav._get_screenshot()
+
+        driver.execute_cdp_cmd.assert_called_once()
+        cmd, params = driver.execute_cdp_cmd.call_args.args
+        assert cmd == "Page.captureScreenshot"
+        assert params["format"] == "jpeg"
+        assert 1 <= int(params["quality"]) <= 100
+        driver.get_screenshot_as_png.assert_not_called()
+        assert out.shape[0] == 24 and out.shape[1] == 32
+        assert out.dtype == np.uint8
+
 
 # ========== Navigator 模板缓存测试 ==========
 
@@ -406,7 +433,7 @@ class TestPlatformBounds:
         assert nav.find_and_click.call_count == 2
         first = nav.find_and_click.call_args_list[0]
         assert first.args[0] == "game_popup_confirm.png"
-        assert first.kwargs["threshold"] == 0.48
+        assert first.kwargs["threshold"] == 0.60
         assert first.kwargs["bounds"] == (0, 720, 2560, 720)
 
 
@@ -467,6 +494,103 @@ class TestGameLoginPlatformFallback:
         assert game_login(nav, "qq_ios", on_status=statuses.append) is False
         mock_pre.assert_not_called()
         assert any("找不到" in s for s in statuses)
+
+
+class TestGameLoginAfterQrBackToPlatform:
+    """扫码后二维码消失、回到平台页时，应再点平台而不是空等到超时。"""
+
+    @patch("login.crop_qr_from_bgr")
+    @patch("login.platform_template_visible")
+    def test_reclicks_platform_after_qr_then_enters(
+        self, mock_plat_vis, mock_crop
+    ):
+        from login import game_login
+        from PIL import Image
+
+        mock_crop.return_value = Image.new("RGB", (40, 40), color=(0, 0, 0))
+        nav = Mock()
+        nav.viewport_size.return_value = (1920, 1080)
+        clicks = {"platform": 0}
+
+        def find_and_click(tpl, **kwargs):
+            if tpl == "game_qq_ios.png":
+                clicks["platform"] += 1
+                return True
+            if tpl == "enter_game.png":
+                return clicks["platform"] >= 2
+            return False
+
+        nav.find_and_click.side_effect = find_and_click
+        # 再点平台之前平台按钮仍可见；点第二次后消失
+        mock_plat_vis.side_effect = lambda *a, **k: clicks["platform"] < 2
+
+        def wait_for_template(tpl, **kwargs):
+            if tpl == "enter_game.png":
+                return clicks["platform"] >= 2
+            return False
+
+        nav.wait_for_template.side_effect = wait_for_template
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            return clock["t"]
+
+        def fake_sleep(seconds=0):
+            clock["t"] += max(float(seconds or 0), 0.5)
+
+        with patch("login.time.time", side_effect=fake_time), \
+             patch("login.time.sleep", side_effect=fake_sleep), \
+             patch("login.POST_QR_PLATFORM_GRACE_S", 5.0), \
+             patch(
+                 "login.capture_viewport_bgr",
+                 return_value=np.zeros((120, 120, 3), dtype=np.uint8),
+             ):
+            statuses = []
+            ok = game_login(nav, "qq_ios", on_status=statuses.append, timeout=60)
+
+        assert ok is True
+        assert clicks["platform"] >= 2
+        assert any("回到平台" in s or "重新点击平台" in s for s in statuses)
+
+    @patch("login.crop_qr_from_bgr")
+    @patch("login.platform_template_visible")
+    def test_still_on_platform_after_reclick_fails_fast(
+        self, mock_plat_vis, mock_crop
+    ):
+        from login import game_login
+        from PIL import Image
+
+        mock_crop.return_value = Image.new("RGB", (40, 40), color=(0, 0, 0))
+        mock_plat_vis.return_value = True
+
+        nav = Mock()
+        nav.viewport_size.return_value = (1920, 1080)
+        nav.find_and_click.return_value = True
+        nav.wait_for_template.return_value = False
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            return clock["t"]
+
+        def fake_sleep(seconds=0):
+            clock["t"] += max(float(seconds or 0), 1.0)
+
+        with patch("login.time.time", side_effect=fake_time), \
+             patch("login.time.sleep", side_effect=fake_sleep), \
+             patch("login.POST_QR_PLATFORM_GRACE_S", 2.0), \
+             patch("login.POST_QR_PLATFORM_STUCK_S", 3.0), \
+             patch(
+                 "login.capture_viewport_bgr",
+                 return_value=np.zeros((120, 120, 3), dtype=np.uint8),
+             ):
+            statuses = []
+            ok = game_login(nav, "qq_ios", on_status=statuses.append, timeout=300)
+
+        assert ok is False
+        assert any("仍停在平台" in s or "将重试" in s for s in statuses)
+        assert clock["t"] < 1000 + 80
 
 
 # ========== PopupMonitor 安全白名单测试 ==========
@@ -1084,6 +1208,7 @@ class TestPreLogoutLoop:
             return "popup_close.png"
 
         nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
 
         def fake_find(template, **kwargs):
             calls.append(("click", template))
@@ -1098,6 +1223,7 @@ class TestPreLogoutLoop:
             confirm_wait_s=0.05,
             classify_fn=fake_classify,
             close_popup_fn=fake_close,
+            platform_visible_fn=lambda n, screen=None: False,
         )
         assert isinstance(result, PreLogoutResult)
         assert result.logout_clicked is True
@@ -1121,6 +1247,7 @@ class TestPreLogoutLoop:
             return "game_popup_confirm.png"
 
         nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
         nav.find_and_click.return_value = True
 
         result = run_pre_logout_loop(
@@ -1130,6 +1257,7 @@ class TestPreLogoutLoop:
             confirm_wait_s=2.0,
             classify_fn=fake_classify,
             close_popup_fn=fake_close,
+            platform_visible_fn=lambda n, screen=None: False,
         )
         assert result.logout_clicked is True
         assert result.confirm_clicked == "game_popup_confirm.png"
@@ -1143,6 +1271,7 @@ class TestPreLogoutLoop:
             return UiState.UNKNOWN, {}
 
         nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
         nav.find_and_click.return_value = True
 
         result = run_pre_logout_loop(
@@ -1152,6 +1281,7 @@ class TestPreLogoutLoop:
             confirm_wait_s=0.05,
             classify_fn=fake_classify,
             close_popup_fn=lambda *a, **k: None,
+            platform_visible_fn=lambda n, screen=None: False,
         )
         assert result.logout_clicked is True
         assert result.confirm_clicked is None
@@ -1165,18 +1295,45 @@ class TestPreLogoutLoop:
             return UiState.UNKNOWN, {}
 
         nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
         nav.find_and_click.return_value = False
 
         result = run_pre_logout_loop(
             nav,
-            timeout_s=0.15,
+            timeout_s=0.08,
             tick_s=0.05,
             confirm_wait_s=1.0,
             classify_fn=fake_classify,
             close_popup_fn=lambda *a, **k: None,
+            platform_visible_fn=lambda n, screen=None: False,
         )
         assert result.logout_clicked is False
-        assert result.timed_out is True
+        assert result.ready_for_platform is True
+
+    def test_no_logout_on_platform_page_exits_immediately(self):
+        from ui_state import UiState
+        from ui_loop import run_pre_logout_loop
+
+        def fake_classify(nav, path_templates=None, allow_confirm=False, screen=None):
+            return UiState.UNKNOWN, {}
+
+        nav = Mock()
+        nav.find_and_click.return_value = False
+        nav._get_screenshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
+
+        result = run_pre_logout_loop(
+            nav,
+            timeout_s=30.0,
+            tick_s=0.01,
+            classify_fn=fake_classify,
+            close_popup_fn=lambda *a, **k: None,
+            platform_visible_fn=lambda n, screen=None: True,
+        )
+        assert result.logout_clicked is False
+        assert result.timed_out is False
+        assert result.ready_for_platform is True
+        # 认出平台页后直接关环，不再反复 find_and_click
+        assert nav.find_and_click.call_count == 0
 
     def test_stop_event_aborts(self):
         import threading
@@ -1190,6 +1347,7 @@ class TestPreLogoutLoop:
             return UiState.UNKNOWN, {}
 
         nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
         nav.find_and_click.return_value = False
 
         result = run_pre_logout_loop(
@@ -1199,6 +1357,7 @@ class TestPreLogoutLoop:
             tick_s=0.01,
             classify_fn=fake_classify,
             close_popup_fn=lambda *a, **k: None,
+            platform_visible_fn=lambda n, screen=None: False,
         )
         assert result.logout_clicked is False
         assert result.timed_out is False

@@ -27,6 +27,8 @@ UNKNOWN_TIMEOUT_S = 45.0
 CLICK_EFFECT_RETRIES = 2
 EFFECT_VERIFY_TIMEOUT = 5
 PRE_LOGOUT_BTN = "game_logout_btn.png"
+# 仅进游戏前预退出环：加大截屏间隔，减轻云游戏 tab 压力（截图 UiLoop 仍用 0.5s）
+PRE_LOGOUT_TICK_S = 2.0
 
 
 @dataclass
@@ -36,6 +38,23 @@ class PreLogoutResult:
     logout_clicked: bool = False
     confirm_clicked: str | None = None
     timed_out: bool = False
+    # True：已关闭环，应立即进入平台选择（无退出按钮或已在平台页）
+    ready_for_platform: bool = False
+
+
+def login_platform_page_visible(
+    nav, threshold: float | None = None, screen=None
+) -> bool:
+    """当前是否已在游戏登录「选微信/QQ」平台页。"""
+    from ui_state import LOGIN_TEMPLATES, LOGIN_THRESHOLD, match_score
+
+    th = LOGIN_THRESHOLD if threshold is None else threshold
+    if screen is None:
+        screen = nav._get_screenshot()
+    for tpl in LOGIN_TEMPLATES:
+        if match_score(nav, tpl, screen=screen) >= th:
+            return True
+    return False
 
 
 def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None) -> str | None:
@@ -85,20 +104,24 @@ def run_pre_logout_loop(
     *,
     stop_event=None,
     on_log: Callable[[str, str], None] | None = None,
-    timeout_s: float = 120.0,
-    tick_s: float = 0.5,
+    timeout_s: float = 30.0,
+    tick_s: float = PRE_LOGOUT_TICK_S,
     confirm_wait_s: float = 5.0,
     classify_fn=None,
     close_popup_fn=None,
+    platform_visible_fn=None,
 ) -> PreLogoutResult:
     """云游戏打开后：弹窗优先，再点登录页退出并确认。
 
-    超时未点到退出时 timed_out=True，调用方应继续阶段 3。
+    无退出按钮且已在平台选择页时立即结束环（ready_for_platform=True）。
+    超时未点到退出时 timed_out=True，调用方应关闭环并继续选平台。
+    刻意少截屏：避免对云游戏标签页连续 get_screenshot 导致 tab crashed。
     """
     classify_fn = classify_fn or classify
     close_popup_fn = close_popup_fn or (
         lambda n, on_log=None: close_perception_popup(n, on_log=on_log)
     )
+    platform_visible_fn = platform_visible_fn or login_platform_page_visible
 
     def _emit(text: str, level: str = "info") -> None:
         if on_log:
@@ -113,53 +136,108 @@ def run_pre_logout_loop(
     def _stopped() -> bool:
         return bool(stop_event is not None and stop_event.is_set())
 
+    def _finish_for_platform(*, timed_out: bool, confirm: str | None = None) -> PreLogoutResult:
+        _emit("预退出感知环已关闭，准备选择登录平台", "success")
+        return PreLogoutResult(
+            logout_clicked=False,
+            confirm_clicked=confirm,
+            timed_out=timed_out,
+            ready_for_platform=True,
+        )
+
     _emit("预退出感知环启动（云游戏 → 登录页退出）")
     deadline = time.time() + max(0.0, float(timeout_s))
     logout_clicked = False
     confirm_clicked: str | None = None
     post_logout_since: float | None = None
+    logout_misses = 0
 
     while not _stopped():
         now = time.time()
         if now >= deadline:
             if logout_clicked:
                 _emit("预退出感知环结束（已退出，确认等待截止）", "success")
-                return PreLogoutResult(True, confirm_clicked, False)
-            _emit("预退出感知环超时：未点到退出按钮", "warn")
-            return PreLogoutResult(False, confirm_clicked, True)
+                return PreLogoutResult(True, confirm_clicked, False, True)
+            _emit("预退出感知环超时：未检测到退出按钮，直接进入选平台", "warn")
+            return _finish_for_platform(timed_out=True, confirm=confirm_clicked)
 
         if logout_clicked and post_logout_since is not None:
             if now - post_logout_since >= confirm_wait_s:
                 _emit("预退出感知环结束（已退出，无确认或已超时）", "success")
-                return PreLogoutResult(True, confirm_clicked, False)
+                return PreLogoutResult(True, confirm_clicked, False, True)
 
-        state, _info = classify_fn(nav)
-        if state in (UiState.POPUP, UiState.CONFIRM):
+        # 每 tick 只截一帧：分类 + 平台判定共用
+        try:
+            screen = nav._get_screenshot()
+        except Exception as exc:
+            _emit(f"预退出截屏失败（标签可能已崩溃）: {exc}", "error")
+            return _finish_for_platform(timed_out=True)
+
+        on_platform = False
+        try:
+            on_platform = bool(platform_visible_fn(nav, screen=screen))
+        except TypeError:
+            # 测试里注入的 lambda 可能不接受 screen=
+            try:
+                on_platform = bool(platform_visible_fn(nav))
+            except Exception:
+                log.debug("检测平台页失败", exc_info=True)
+        except Exception:
+            log.debug("检测平台页失败", exc_info=True)
+
+        try:
+            state, info = classify_fn(nav, screen=screen)
+        except TypeError:
+            state, info = classify_fn(nav)
+        scores = (info or {}).get("scores") or {}
+        if not on_platform and scores:
+            from ui_state import LOGIN_TEMPLATES, LOGIN_THRESHOLD
+
+            best_plat = max((scores.get(t, -1.0) for t in LOGIN_TEMPLATES), default=-1.0)
+            if best_plat >= LOGIN_THRESHOLD:
+                on_platform = True
+
+        # 已在平台选择页：立刻关环，勿再找退出/确认（少截屏，防 tab crash）
+        if not logout_clicked and on_platform:
+            logout_misses += 1
+            if logout_misses >= 1:
+                _emit("未检测到退出按钮，已在平台选择页，关闭预退出感知环", "info")
+                return _finish_for_platform(timed_out=False)
+
+        # 已在平台选择页时不再关「确认」误匹配
+        if state in (UiState.POPUP, UiState.CONFIRM) and not on_platform:
             hit = close_popup_fn(nav, on_log=on_log)
             if logout_clicked and hit in POPUP_CONFIRM_TEMPLATES:
                 confirm_clicked = hit
                 _emit(f"预退出感知环结束（退出并确认: {hit}）", "success")
-                return PreLogoutResult(True, confirm_clicked, False)
+                return PreLogoutResult(True, confirm_clicked, False, True)
             time.sleep(tick_s)
             continue
 
         if not logout_clicked:
             if nav.find_and_click(
                 PRE_LOGOUT_BTN,
-                timeout=2,
-                max_retries=2,
+                timeout=1,
+                max_retries=1,
                 allow_fallback=False,
             ):
                 logout_clicked = True
                 post_logout_since = time.time()
+                logout_misses = 0
                 _emit("已点击退出登录", "success")
+            else:
+                logout_misses += 1
+                # 不再调用 click_confirm_dialog（连续多次截屏易搞崩云游戏 tab）
+                if logout_misses >= 3:
+                    _emit("连续未找到退出按钮，关闭预退出环并进入选平台", "warn")
+                    return _finish_for_platform(timed_out=False)
             time.sleep(tick_s)
             continue
 
         time.sleep(tick_s)
 
     _emit("预退出感知环已停止", "warn")
-    return PreLogoutResult(logout_clicked, confirm_clicked, False)
+    return PreLogoutResult(logout_clicked, confirm_clicked, False, True)
 
 
 class Action(Enum):

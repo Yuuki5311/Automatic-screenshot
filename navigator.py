@@ -4,6 +4,7 @@
 使用 Selenium 截取浏览器视口，经 CDP 注入 CSS 坐标点击。
 """
 
+import base64
 import os
 import time
 import cv2
@@ -13,6 +14,31 @@ from config import MATCH_THRESHOLD, MAX_RETRIES, RETRY_INTERVAL, CLICK_INTERVAL,
 from logger import get_logger
 
 log = get_logger()
+
+# 感知/匹配用截屏：JPEG 有损，体积远小于 PNG，减轻云游戏 tab 压力
+CAPTURE_JPEG_QUALITY = 70
+
+
+def capture_viewport_bgr(driver, *, quality: int = CAPTURE_JPEG_QUALITY) -> np.ndarray:
+    """经 CDP 截取视口为 BGR（JPEG）。识别环共用此路径。"""
+    q = max(1, min(100, int(quality)))
+    result = driver.execute_cdp_cmd(
+        "Page.captureScreenshot",
+        {
+            "format": "jpeg",
+            "quality": q,
+            "fromSurface": True,
+        },
+    )
+    raw = result.get("data") if isinstance(result, dict) else None
+    if not raw:
+        raise RuntimeError("Page.captureScreenshot 未返回 data")
+    data = base64.b64decode(raw)
+    arr = np.frombuffer(data, dtype=np.uint8)
+    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise RuntimeError("JPEG 截屏解码失败")
+    return bgr
 
 
 class Navigator:
@@ -52,10 +78,7 @@ class Navigator:
 
     def _get_screenshot(self) -> np.ndarray:
         """截取当前浏览器视口，返回 OpenCV 格式的 BGR numpy 数组。"""
-        png = self.driver.get_screenshot_as_png()
-        arr = np.frombuffer(png, dtype=np.uint8)
-        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        return bgr
+        return capture_viewport_bgr(self.driver)
 
     def _template_path(self, template_name: str) -> str:
         """构建模板文件的完整路径。"""

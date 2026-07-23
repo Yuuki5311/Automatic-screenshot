@@ -464,6 +464,8 @@ class App(tk.Tk):
                 pre = run_pre_logout_loop(
                     _nav,
                     stop_event=self._stop_event,
+                    timeout_s=30.0,
+                    tick_s=2.0,
                     on_log=lambda text, level="info": self._send(
                         {"type": "log", "text": text, "level": level}
                     ),
@@ -481,9 +483,16 @@ class App(tk.Tk):
                 elif pre.timed_out:
                     self._send({
                         "type": "log",
-                        "text": "预退出超时未点到退出，继续游戏登录",
+                        "text": "未检测到退出按钮（已超时），关闭预退出环，继续选择平台",
                         "level": "warn",
                     })
+                else:
+                    self._send({
+                        "type": "log",
+                        "text": "未检测到退出按钮（已在平台页），关闭预退出环，继续选择平台",
+                        "level": "info",
+                    })
+                self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
                 monitor = None
 
             elif self._is_rerun:
@@ -506,6 +515,8 @@ class App(tk.Tk):
                 pre = run_pre_logout_loop(
                     _nav,
                     stop_event=self._stop_event,
+                    timeout_s=30.0,
+                    tick_s=2.0,
                     on_log=lambda text, level="info": self._send(
                         {"type": "log", "text": text, "level": level}
                     ),
@@ -523,9 +534,16 @@ class App(tk.Tk):
                 elif pre.timed_out:
                     self._send({
                         "type": "log",
-                        "text": "预退出超时未点到退出，继续游戏登录",
+                        "text": "未检测到退出按钮（已超时），关闭预退出环，继续选择平台",
                         "level": "warn",
                     })
+                else:
+                    self._send({
+                        "type": "log",
+                        "text": "未检测到退出按钮（已在平台页），关闭预退出环，继续选择平台",
+                        "level": "info",
+                    })
+                self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
                 monitor = None
 
             # ====== 阶段 3: 游戏内登录 + 截图 ======
