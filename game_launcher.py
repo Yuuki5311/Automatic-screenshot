@@ -174,8 +174,8 @@ def launch_game(driver: WebDriver) -> bool:
         driver.save_screenshot("debug_no_game_tab.png")
         return False
 
-    # 新标签已打开，再稍等画面加载
-    time.sleep(PAGE_LOAD_WAIT)
+    # 新标签已打开，再稍等画面加载 + 额外等待
+    time.sleep(PAGE_LOAD_WAIT + 5)
 
     print("[启动] 游戏启动流程完成（已切换到云游戏标签页）")
     return True
