@@ -339,6 +339,130 @@ def web_login(
     return False
 
 
+def manual_login(
+    driver: WebDriver,
+    on_status: Callable[[str], None] | None = None,
+    ready_event=None,
+    timeout: int = 600,
+) -> bool:
+    """打开 gamer.qq.com，等待用户手动完成 QQ 密码登录。
+
+    与 web_login 不同：不点击登录按钮、不选平台、不切 iframe。
+    打开页面后进入轮询，等待用户在浏览器中自行完成登录。
+
+    Args:
+        driver: Selenium WebDriver 实例。
+        on_status: 状态更新回调。
+        ready_event: threading.Event，用户点击"完成登录"时设置。
+        timeout: 等待超时（秒），默认 10 分钟。
+
+    Returns:
+        bool: 登录成功返回 True。
+    """
+    if on_status:
+        on_status("请在浏览器中手动完成 QQ 登录...")
+
+    # 1. 打开 gamer.qq.com
+    log.info(f"手动登录模式，正在打开: {CLOUD_GAMING_URL}")
+    try:
+        driver.set_page_load_timeout(60)
+        driver.get(CLOUD_GAMING_URL)
+    except Exception as e:
+        if on_status:
+            on_status(f"打开腾讯先锋页面失败: {e}")
+        log.exception("手动登录打开 CLOUD_GAMING_URL 失败")
+        return False
+    log.info(f"页面已打开: {driver.current_url}")
+    time.sleep(PAGE_LOAD_WAIT)
+
+    # 2. 轮询等待用户完成登录
+    start = time.time()
+    while time.time() - start < timeout:
+
+        # 检测登录成功（复用 web_login 的检测逻辑）
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
+
+        # 5a. 检测登录弹窗关闭
+        try:
+            login_popup = driver.find_element(By.ID, "user_login")
+            if not login_popup.is_displayed():
+                if on_status:
+                    on_status("✅ 腾讯先锋登录成功（弹窗已关闭）")
+                time.sleep(PAGE_LOAD_WAIT)
+                return True
+        except NoSuchElementException:
+            if on_status:
+                on_status("✅ 腾讯先锋登录成功（已登录）")
+            time.sleep(PAGE_LOAD_WAIT)
+            return True
+        except Exception:
+            pass
+
+        # 5b. Cookie 检测
+        try:
+            cookies = driver.get_cookies()
+            for cookie in cookies:
+                if cookie.get("name", "") in (
+                    "p_uin", "p_skey", "pt2gguin", "uin", "skey",
+                ):
+                    if on_status:
+                        on_status("✅ 腾讯先锋登录成功（Cookie 检测）")
+                    time.sleep(PAGE_LOAD_WAIT)
+                    return True
+        except Exception:
+            pass
+
+        # 5c. JS 检测
+        try:
+            logged_in = driver.execute_script("""
+                if (document.cookie.indexOf('p_uin=') > -1) return true;
+                if (document.cookie.indexOf('uin=') > -1) return true;
+                if (document.querySelector('[class*="user"]')) return true;
+                if (document.querySelector('[class*="avatar"]')) return true;
+                return false;
+            """)
+            if logged_in:
+                if on_status:
+                    on_status("✅ 腾讯先锋登录成功（JS 检测）")
+                time.sleep(PAGE_LOAD_WAIT)
+                return True
+        except Exception:
+            pass
+
+        # 5d. CSS 检测用户元素
+        user_selectors = [
+            ".user-info", ".user-name", ".user-avatar", ".avatar",
+            "img[class*='avatar']", "[class*='user']", "[class*='nickname']",
+            ".header-avatar", ".login-user", "#user-info",
+        ]
+        for sel in user_selectors:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, sel)
+                for elem in elements:
+                    if elem.is_displayed():
+                        if on_status:
+                            on_status("✅ 腾讯先锋登录成功（用户元素检测）")
+                        time.sleep(PAGE_LOAD_WAIT)
+                        return True
+            except Exception:
+                continue
+
+        # 如果 ready_event 被设置，做一次额外验证后给出反馈
+        if ready_event is not None and ready_event.is_set():
+            if on_status:
+                on_status("⚠️ 未检测到登录状态，请确认已登录后再次点击")
+            ready_event.clear()
+
+        time.sleep(2)
+
+    if on_status:
+        on_status("⚠️ 手动登录超时")
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 游戏内登录（云游戏画面）
 # ---------------------------------------------------------------------------
