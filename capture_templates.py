@@ -39,6 +39,8 @@ TEMPLATES = [
     ("game_qq_ios.png", "「与QQ iOS好友玩」", "登录界面右半边"),
     ("game_qq_android.png", "「与QQ安卓好友玩」", "登录界面右半边"),
     ("game_login_other.png", "「登录其他账号」", "登录相关弹窗底部"),
+    ("game_auth_login_1.png", "「授权登录」按钮 1", "登录授权弹窗下半屏"),
+    ("game_auth_login_2.png", "「授权登录」按钮 2", "登录授权弹窗下半屏"),
     ("enter_game.png", "「进入游戏」按钮", "登录成功后"),
     ("game_logout_confirm.png", "退出确认「确定」", "退出确认弹窗下方"),
     ("game_popup_confirm.png", "通用/云服务器确认「确定」", "确认弹窗下方"),
