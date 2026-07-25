@@ -626,9 +626,21 @@ class App(tk.Tk):
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功（已点进入游戏）", "level": "success"})
 
-            # ---- 进入游戏后先等 10 秒，再清弹窗，然后验证是否进入主界面 ----
+            # ---- 进入游戏后先等 10 秒，再清返回箭头 + 弹窗，然后验证是否进入主界面 ----
             self._send({"type": "log", "text": "等待 10 秒后处理弹窗..."})
             time.sleep(10)
+
+            # 先处理返回箭头：点进入游戏后可能停在子页面
+            ARROW_TIMEOUT = 5
+            while True:
+                if nav.find_and_click("back_arrow.png", timeout=ARROW_TIMEOUT, max_retries=1):
+                    self._send({"type": "log", "text": "已点击返回箭头，继续检查..."})
+                    time.sleep(1)
+                    continue
+                break
+            self._send({"type": "log", "text": "返回箭头检查完毕"})
+
+            # 再清弹窗
             self._send({"type": "log", "text": "进入游戏后清理弹窗..."})
             monitor = PopupMonitor(navigator=nav)
             monitor.close_all_popups()
