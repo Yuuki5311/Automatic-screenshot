@@ -375,17 +375,29 @@ def manual_login(
     log.info(f"页面已打开: {driver.current_url}")
     time.sleep(PAGE_LOAD_WAIT)
 
-    # 2. 轮询等待用户完成登录
+    # 2. 等待用户点击"完成登录"后验证
     start = time.time()
     while time.time() - start < timeout:
 
-        # 检测登录成功（复用 web_login 的检测逻辑）
+        # 等待 ready_event（用户点击"完成登录"）
+        if ready_event is not None:
+            # 每 2 秒检查一次，同时检查超时
+            while not ready_event.is_set() and time.time() - start < timeout:
+                time.sleep(2)
+
+        if ready_event is None or not ready_event.is_set():
+            # 超时
+            break
+
+        ready_event.clear()
+
+        # 用户点击了"完成登录"——做一次登录验证
         try:
             driver.switch_to.default_content()
         except Exception:
             pass
 
-        # 5a. 检测登录弹窗关闭
+        # 检测登录弹窗关闭
         try:
             login_popup = driver.find_element(By.ID, "user_login")
             if not login_popup.is_displayed():
@@ -401,7 +413,7 @@ def manual_login(
         except Exception:
             pass
 
-        # 5b. Cookie 检测
+        # Cookie 检测
         try:
             cookies = driver.get_cookies()
             for cookie in cookies:
@@ -415,7 +427,7 @@ def manual_login(
         except Exception:
             pass
 
-        # 5c. JS 检测
+        # JS 检测
         try:
             logged_in = driver.execute_script("""
                 if (document.cookie.indexOf('p_uin=') > -1) return true;
@@ -432,7 +444,7 @@ def manual_login(
         except Exception:
             pass
 
-        # 5d. CSS 检测用户元素
+        # CSS 检测用户元素
         user_selectors = [
             ".user-info", ".user-name", ".user-avatar", ".avatar",
             "img[class*='avatar']", "[class*='user']", "[class*='nickname']",
@@ -450,13 +462,10 @@ def manual_login(
             except Exception:
                 continue
 
-        # 如果 ready_event 被设置，做一次额外验证后给出反馈
-        if ready_event is not None and ready_event.is_set():
-            if on_status:
-                on_status("⚠️ 未检测到登录状态，请确认已登录后再次点击")
-            ready_event.clear()
-
-        time.sleep(2)
+        # 未检测到登录
+        if on_status:
+            on_status("⚠️ 未检测到登录状态，请确认已登录后再次点击")
+        continue
 
     if on_status:
         on_status("⚠️ 手动登录超时")
