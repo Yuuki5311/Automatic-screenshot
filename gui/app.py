@@ -44,6 +44,9 @@ class App(tk.Tk):
         # ---- 账号输入 ----
         self._account_var = tk.StringVar(value="")
 
+        # ---- 手动登录 ----
+        self._manual_login_event = threading.Event()
+
         # ---- 构建 UI ----
         self._build_ui()
 
@@ -90,6 +93,9 @@ class App(tk.Tk):
         ).pack(anchor="w", pady=2)
         ttk.Radiobutton(
             login_frame, text="微信扫码登录", variable=self._login_type, value="wechat"
+        ).pack(anchor="w", pady=2)
+        ttk.Radiobutton(
+            login_frame, text="QQ 密码登录（手动）", variable=self._login_type, value="qq_password"
         ).pack(anchor="w", pady=2)
 
         # 游戏内登录平台
@@ -182,6 +188,10 @@ class App(tk.Tk):
         self._exit_btn = ttk.Button(
             bottom, text="退 出", command=self._on_close
         )
+        self._manual_login_btn = ttk.Button(
+            bottom, text="完成登录 →", command=self._on_manual_login_done
+        )
+        # 初始隐藏，仅手动登录时通过 pack 显示
         self._exit_btn.pack(side="right")
 
         # 默认显示待命页
@@ -279,6 +289,10 @@ class App(tk.Tk):
             self._driver = None
         self.destroy()
 
+    def _on_manual_login_done(self):
+        """用户点击完成登录 → 唤醒后台线程。"""
+        self._manual_login_event.set()
+
     # ------------------------------------------------------------------
     # 队列轮询
     # ------------------------------------------------------------------
@@ -299,6 +313,11 @@ class App(tk.Tk):
 
         if msg_type == "log":
             self._log_view.add_log(msg["text"], msg.get("level", "info"))
+
+        elif msg_type == "show_manual_btn":
+            self._manual_login_btn.pack(side="right", padx=(0, 5))
+        elif msg_type == "hide_manual_btn":
+            self._manual_login_btn.pack_forget()
 
         elif msg_type == "progress":
             self._log_view.update_progress(msg["current"], msg["total"])
@@ -361,7 +380,7 @@ class App(tk.Tk):
             # 依赖应已在 main 主线程预加载；此处再导入以便开发模式懒加载
             from browser import create_browser
             from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path, writable_path
-            from login import web_login, game_login, click_confirm_dialog
+            from login import web_login, game_login, click_confirm_dialog, manual_login
             from game_launcher import launch_game
             from navigator import Navigator
             from screenshotter import Screenshotter
@@ -375,66 +394,106 @@ class App(tk.Tk):
                     return
 
                 _log.info("[阶段1] 开始腾讯先锋登录")
-                self._send({
-                    "type": "log",
-                    "text": "正在打开 Edge 浏览器（首次需联网下载驱动，可能需 1～2 分钟）...",
-                })
+                login_type = getattr(self, "_selected_login_type", None) or "qq"
 
-                try:
-                    driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
-                except Exception as e:
-                    _log.exception("[阶段1] 打开浏览器失败")
+                if login_type == "qq_password":
+                    # ---- 半自动密码登录 ----
+                    _log.info("[阶段1] 手动密码登录模式")
+                    try:
+                        driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
+                    except Exception as e:
+                        _log.exception("[阶段1] 打开浏览器失败")
+                        self._send({"type": "log", "text": f"❌ 打开浏览器失败: {e}", "level": "error"})
+                        self._send({"type": "done", "text": f"❌ 打开浏览器失败:\n{e}"})
+                        return
+
+                    self._driver = driver
+                    self._send({"type": "log", "text": "✅ 浏览器已打开", "level": "success"})
+
+                    def _on_status(text):
+                        if "成功" in text:
+                            self._send({"type": "log", "text": text, "level": "success"})
+                        elif "失败" in text or "超时" in text or "⚠" in text:
+                            self._send({"type": "log", "text": text,
+                                        "level": "error" if "失败" in text else "warn"})
+                        else:
+                            self._send({"type": "log", "text": text})
+
+                    self._send({"type": "log", "text": "请在浏览器中手动完成 QQ 登录..."})
+                    self._send({"type": "page", "name": "progress"})
+                    self._queue.put({"type": "show_manual_btn"})
+
+                    if not manual_login(driver, _on_status, ready_event=self._manual_login_event):
+                        self._queue.put({"type": "hide_manual_btn"})
+                        self._send({"type": "done", "text": "❌ 手动登录失败或超时"})
+                        return
+
+                    self._queue.put({"type": "hide_manual_btn"})
+                    self._platform_logged_in = True
+                    self._send({"type": "page", "name": "progress"})
+                    self._send({"type": "log", "text": "✅ 腾讯先锋登录成功", "level": "success"})
+
+                else:
+                    # ---- 扫码登录（原有代码不变，仅删除 login_type = getattr(...) 行） ----
                     self._send({
                         "type": "log",
-                        "text": f"❌ 打开浏览器失败: {e}",
-                        "level": "error",
+                        "text": "正在打开 Edge 浏览器（首次需联网下载驱动，可能需 1～2 分钟）...",
                     })
-                    self._send({"type": "done", "text": f"❌ 打开浏览器失败:\n{e}"})
-                    return
 
-                self._driver = driver
-                login_type = getattr(self, "_selected_login_type", None) or "qq"
-                _log.info(f"[阶段1] 登录方式: {login_type}，浏览器已就绪")
-                self._send({"type": "log", "text": "✅ 浏览器已打开", "level": "success"})
-
-                def on_qr(image=None):
-                    title = f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录"
-                    if image is not None:
+                    try:
+                        driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
+                    except Exception as e:
+                        _log.exception("[阶段1] 打开浏览器失败")
                         self._send({
-                            "type": "qr",
-                            "image": image,
-                            "title": title,
-                            "status": "⏳ 请扫描下方二维码（也可在浏览器窗口扫）...",
+                            "type": "log",
+                            "text": f"❌ 打开浏览器失败: {e}",
+                            "level": "error",
                         })
-                    else:
-                        self._send({
-                            "type": "scan_wait",
-                            "title": title,
-                            "text": "⏳ 未截到二维码，请直接在浏览器窗口扫码...",
-                        })
+                        self._send({"type": "done", "text": f"❌ 打开浏览器失败:\n{e}"})
+                        return
 
-                def on_status(text):
-                    if "成功" in text:
-                        self._send({"type": "qr_status", "text": text, "color": "green"})
-                    elif "失败" in text or "超时" in text or "⚠" in text:
-                        self._send({"type": "qr_status", "text": text, "color": "red"})
-                    else:
-                        self._send({"type": "qr_status", "text": text})
-                    self._send({"type": "log", "text": text,
-                                "level": "success" if "成功" in text else ("error" if "失败" in text or "超时" in text else "info")})
+                    self._driver = driver
+                    _log.info(f"[阶段1] 登录方式: {login_type}，浏览器已就绪")
+                    self._send({"type": "log", "text": "✅ 浏览器已打开", "level": "success"})
 
-                self._send({"type": "log", "text": f"开始腾讯先锋{'QQ' if login_type == 'qq' else '微信'}扫码登录..."})
+                    def on_qr(image=None):
+                        title = f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录"
+                        if image is not None:
+                            self._send({
+                                "type": "qr",
+                                "image": image,
+                                "title": title,
+                                "status": "⏳ 请扫描下方二维码（也可在浏览器窗口扫）...",
+                            })
+                        else:
+                            self._send({
+                                "type": "scan_wait",
+                                "title": title,
+                                "text": "⏳ 未截到二维码，请直接在浏览器窗口扫码...",
+                            })
 
-                if not web_login(driver, login_type, on_qr, on_status):
-                    _log.error("[阶段1] 腾讯先锋登录失败")
-                    self._send({"type": "log", "text": "❌ 腾讯先锋登录失败", "level": "error"})
-                    self._send({"type": "done", "text": "❌ 腾讯先锋登录失败"})
-                    return
+                    def on_status(text):
+                        if "成功" in text:
+                            self._send({"type": "qr_status", "text": text, "color": "green"})
+                        elif "失败" in text or "超时" in text or "⚠" in text:
+                            self._send({"type": "qr_status", "text": text, "color": "red"})
+                        else:
+                            self._send({"type": "qr_status", "text": text})
+                        self._send({"type": "log", "text": text,
+                                    "level": "success" if "成功" in text else ("error" if "失败" in text or "超时" in text else "info")})
 
-                _log.info("[阶段1] 腾讯先锋登录成功")
-                self._platform_logged_in = True
-                self._send({"type": "page", "name": "progress"})
-                self._send({"type": "log", "text": "✅ 腾讯先锋登录成功", "level": "success"})
+                    self._send({"type": "log", "text": f"开始腾讯先锋{'QQ' if login_type == 'qq' else '微信'}扫码登录..."})
+
+                    if not web_login(driver, login_type, on_qr, on_status):
+                        _log.error("[阶段1] 腾讯先锋登录失败")
+                        self._send({"type": "log", "text": "❌ 腾讯先锋登录失败", "level": "error"})
+                        self._send({"type": "done", "text": "❌ 腾讯先锋登录失败"})
+                        return
+
+                    _log.info("[阶段1] 腾讯先锋登录成功")
+                    self._platform_logged_in = True
+                    self._send({"type": "page", "name": "progress"})
+                    self._send({"type": "log", "text": "✅ 腾讯先锋登录成功", "level": "success"})
 
                 # ====== 阶段 2: 搜索游戏并启动 ======
                 if self._stop_event.is_set():
