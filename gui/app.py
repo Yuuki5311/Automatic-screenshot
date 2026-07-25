@@ -239,8 +239,9 @@ class App(tk.Tk):
         self._platform_choice = self._platform_var.get()
         self._selected_login_type = self._login_type.get()
         self._log_view.add_log(f"游戏平台: {self._platform_choice}", "info")
+        _login_labels = {"qq": "QQ 扫码", "wechat": "微信扫码", "qq_password": "QQ 密码"}
         self._log_view.add_log(
-            f"腾讯先锋登录: {'QQ' if self._selected_login_type == 'qq' else '微信'}",
+            f"腾讯先锋登录: {_login_labels.get(self._selected_login_type, self._selected_login_type)}",
             "info",
         )
 
