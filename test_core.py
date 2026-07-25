@@ -496,101 +496,73 @@ class TestGameLoginPlatformFallback:
         assert any("找不到" in s for s in statuses)
 
 
-class TestGameLoginAfterQrBackToPlatform:
-    """扫码后二维码消失、回到平台页时，应再点平台而不是空等到超时。"""
+class TestGameLoginAuthFlow:
+    """新授权登录流程：enter_game 直通 → 清弹窗 → 点平台 → 授权1 → 授权2 → enter_game。"""
 
-    @patch("login.crop_qr_from_bgr")
-    @patch("login.platform_template_visible")
-    def test_reclicks_platform_after_qr_then_enters(
-        self, mock_plat_vis, mock_crop
-    ):
+    @patch("login.time.sleep", return_value=None)
+    @patch("ui_loop.close_perception_popup")
+    def test_enter_game_direct_when_visible(self, mock_close, _sleep):
+        """enter_game 立即可见时直接点击进入，跳过中间步骤。"""
         from login import game_login
-        from PIL import Image
 
-        mock_crop.return_value = Image.new("RGB", (40, 40), color=(0, 0, 0))
         nav = Mock()
         nav.viewport_size.return_value = (1920, 1080)
-        clicks = {"platform": 0}
+        nav.wait_for_template.return_value = True   # enter_game 可见
+        nav.find_and_click.return_value = True
+        statuses = []
 
-        def find_and_click(tpl, **kwargs):
-            if tpl == "game_qq_ios.png":
-                clicks["platform"] += 1
-                return True
-            if tpl == "enter_game.png":
-                return clicks["platform"] >= 2
-            return False
+        assert game_login(nav, "qq_ios", on_status=statuses.append) is True
+        # enter_game 直接返回，不调清弹窗
+        mock_close.assert_not_called()
+        assert any("直接进入" in s for s in statuses)
 
-        nav.find_and_click.side_effect = find_and_click
-        # 再点平台之前平台按钮仍可见；点第二次后消失
-        mock_plat_vis.side_effect = lambda *a, **k: clicks["platform"] < 2
+    @patch("login.time.sleep", return_value=None)
+    @patch("ui_loop.close_perception_popup")
+    def test_full_auth_flow_when_enter_game_not_visible(self, mock_close, _sleep):
+        """enter_game 不可见时走完整授权流程。"""
+        from login import game_login
 
+        nav = Mock()
+        nav.viewport_size.return_value = (1920, 1080)
+
+        # enter_game 第一轮不可见，第二轮（授权后）可见
+        enter_visible = {"n": 0}
         def wait_for_template(tpl, **kwargs):
             if tpl == "enter_game.png":
-                return clicks["platform"] >= 2
+                enter_visible["n"] += 1
+                return enter_visible["n"] >= 2
+            if tpl == "game_logout_btn.png":
+                return False
             return False
-
         nav.wait_for_template.side_effect = wait_for_template
+        nav.find_and_click.return_value = True
+        statuses = []
 
-        clock = {"t": 1000.0}
+        assert game_login(nav, "qq_ios", on_status=statuses.append) is True
+        # 清弹窗被调用
+        assert mock_close.call_count == 3
+        # 点击了平台 + 授权1 + 授权2 + enter_game
+        clicked = [c.args[0] for c in nav.find_and_click.call_args_list]
+        assert "game_qq_ios.png" in clicked
+        assert "game_auth_login_1.png" in clicked
+        assert "game_auth_login_2.png" in clicked
+        assert "enter_game.png" in clicked
+        assert any("已点击进入游戏" in s for s in statuses)
 
-        def fake_time():
-            return clock["t"]
-
-        def fake_sleep(seconds=0):
-            clock["t"] += max(float(seconds or 0), 0.5)
-
-        with patch("login.time.time", side_effect=fake_time), \
-             patch("login.time.sleep", side_effect=fake_sleep), \
-             patch("login.POST_QR_PLATFORM_GRACE_S", 5.0), \
-             patch(
-                 "login.capture_viewport_bgr",
-                 return_value=np.zeros((120, 120, 3), dtype=np.uint8),
-             ):
-            statuses = []
-            ok = game_login(nav, "qq_ios", on_status=statuses.append, timeout=60)
-
-        assert ok is True
-        assert clicks["platform"] >= 2
-        assert any("回到平台" in s or "重新点击平台" in s for s in statuses)
-
-    @patch("login.crop_qr_from_bgr")
-    @patch("login.platform_template_visible")
-    def test_still_on_platform_after_reclick_fails_fast(
-        self, mock_plat_vis, mock_crop
-    ):
+    @patch("login.time.sleep", return_value=None)
+    @patch("ui_loop.close_perception_popup")
+    def test_auth_flow_missing_auth1_returns_false(self, mock_close, _sleep):
+        """找不到授权登录1时返回 False。"""
         from login import game_login
-        from PIL import Image
-
-        mock_crop.return_value = Image.new("RGB", (40, 40), color=(0, 0, 0))
-        mock_plat_vis.return_value = True
 
         nav = Mock()
         nav.viewport_size.return_value = (1920, 1080)
-        nav.find_and_click.return_value = True
-        nav.wait_for_template.return_value = False
+        nav.wait_for_template.return_value = False  # enter_game 不可见
+        nav.find_and_click.side_effect = lambda tpl, **kwargs: tpl != "game_auth_login_1.png"
+        statuses = []
 
-        clock = {"t": 1000.0}
-
-        def fake_time():
-            return clock["t"]
-
-        def fake_sleep(seconds=0):
-            clock["t"] += max(float(seconds or 0), 1.0)
-
-        with patch("login.time.time", side_effect=fake_time), \
-             patch("login.time.sleep", side_effect=fake_sleep), \
-             patch("login.POST_QR_PLATFORM_GRACE_S", 2.0), \
-             patch("login.POST_QR_PLATFORM_STUCK_S", 3.0), \
-             patch(
-                 "login.capture_viewport_bgr",
-                 return_value=np.zeros((120, 120, 3), dtype=np.uint8),
-             ):
-            statuses = []
-            ok = game_login(nav, "qq_ios", on_status=statuses.append, timeout=300)
-
-        assert ok is False
-        assert any("仍停在平台" in s or "将重试" in s for s in statuses)
-        assert clock["t"] < 1000 + 80
+        assert game_login(nav, "qq_ios", on_status=statuses.append) is False
+        assert any("授权登录按钮 1" in s for s in statuses)
 
 
 # ========== PopupMonitor 安全白名单测试 ==========

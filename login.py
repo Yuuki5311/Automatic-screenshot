@@ -573,113 +573,72 @@ def game_login(
 
     on_status(f"已选择 {platform_name} 登录")
 
-    # ---- 1a. 检查「登录其他账号」弹窗 ----
+    # ---- 1a. 快速检测 enter_game ----
+    if nav.wait_for_template("enter_game.png", timeout=2):
+        on_status("检测到进入游戏按钮，直接进入...")
+        if nav.find_and_click("enter_game.png", timeout=5):
+            on_status("✅ 已点击进入游戏")
+            time.sleep(3)
+            return True
+
+    # ---- 2. 感知环清弹窗 ----
+    on_status("清理弹窗...")
+    from ui_loop import close_perception_popup
+    for _ in range(3):
+        close_perception_popup(nav)
+        time.sleep(1)
+
+    # ---- 3. 点击平台登录按钮 ----
+    on_status(f"选择登录平台: {platform_name}...")
     time.sleep(2)
-    login_other_bounds = bottom_half_bounds(vw, vh)
-    if nav.find_and_click("game_login_other.png", timeout=3, bounds=login_other_bounds):
-        on_status("已点击「登录其他账号」")
-        time.sleep(2)
 
-    # ---- 3. 等待扫码登录 ----
-    on_status(f"请在游戏窗口中扫描 {platform_name} 登录二维码...")
-    time.sleep(3)
+    if not nav.find_and_click(template_file, timeout=10, bounds=platform_bounds, max_retries=5):
+        on_status(f"找不到 {platform_name} 登录按钮 ({template_file})")
+        if nav.wait_for_template("game_logout_btn.png", timeout=3):
+            on_status("检测到退出按钮，回退到退出登录步骤...")
+            from ui_loop import run_pre_logout_loop
 
-    start = time.time()
-    qr_appeared = False
-    qr_appeared_at: float | None = None
-    last_qr_push = 0.0
-    QR_CODE_TIMEOUT = 15  # 15 秒内必须出现二维码
-
-    avatar_detected_at = None  # 头像出现时间（用于快速重试）
-    platform_reclicked_after_qr = False
-    platform_reclicked_at: float | None = None
-
-    while time.time() - start < timeout:
-        # ---- 检测登录成功 ----
-        if nav.wait_for_template("avatar.png", timeout=2):
-            on_status("✅ 游戏登录成功")
+            pre = run_pre_logout_loop(nav, on_log=lambda text, level="info": on_status(text))
+            if pre.logout_clicked:
+                on_status("已回退退出，重新选择登录平台...")
+            elif pre.timed_out:
+                on_status("回退退出超时，仍尝试选择平台...")
             time.sleep(2)
-            if nav.find_and_click("enter_game.png", timeout=10):
-                on_status("✅ 已点击进入游戏")
-                time.sleep(3)
-                return True
-            # avatar 出现但 enter_game 没出现 → 记录时间，限期等待
-            if avatar_detected_at is None:
-                avatar_detected_at = time.time()
-
-        if nav.wait_for_template("enter_game.png", timeout=2):
-            if nav.find_and_click("enter_game.png", timeout=3):
-                on_status("✅ 游戏登录成功，已进入游戏")
-                time.sleep(3)
-                return True
-
-        # avatar 已出现超过 30 秒仍未找到 enter_game → 返回重试平台选择
-        if avatar_detected_at and time.time() - avatar_detected_at > 30:
-            on_status("⚠️ 登录成功但未找到进入游戏按钮，将重试平台选择")
+            vw, vh = nav.viewport_size()
+            platform_bounds = platform_select_bounds(vw, vh, platform)
+            if not nav.find_and_click(
+                template_file, timeout=10, bounds=platform_bounds, max_retries=5
+            ):
+                on_status(f"回退后仍找不到 {platform_name} 登录按钮")
+                return False
+        else:
             return False
 
-        # ---- 扫码后若二维码消失又回到平台页：再点一次平台（授权后常见） ----
-        if (
-            qr_appeared
-            and qr_appeared_at is not None
-            and time.time() - qr_appeared_at >= POST_QR_PLATFORM_GRACE_S
-        ):
-            if platform_template_visible(nav, template_file, bounds=platform_bounds):
-                if not platform_reclicked_after_qr:
-                    on_status("⚠️ 扫码后回到平台选择，重新点击平台...")
-                    if nav.find_and_click(
-                        template_file,
-                        timeout=5,
-                        bounds=platform_bounds,
-                        max_retries=3,
-                    ):
-                        platform_reclicked_after_qr = True
-                        platform_reclicked_at = time.time()
-                        on_status(f"已再次点击 {platform_name}")
-                        time.sleep(2)
-                        continue
-                    on_status("⚠️ 扫码后无法再次点击平台，将重试")
-                    return False
-                if (
-                    platform_reclicked_at is not None
-                    and time.time() - platform_reclicked_at >= POST_QR_PLATFORM_STUCK_S
-                ):
-                    on_status("⚠️ 扫码后仍停在平台选择，将重试")
-                    return False
+    on_status(f"已选择 {platform_name} 登录")
 
-        # ---- 检测 / 刷新二维码 ----
-        if not qr_appeared:
-            try:
-                frame_bgr = capture_viewport_bgr(nav.driver)
-                image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
-                if image is not None:
-                    qr_appeared = True
-                    qr_appeared_at = time.time()
-                    if on_qr:
-                        on_qr(image)
-                    last_qr_push = time.time()
-                    on_status("✅ 检测到登录二维码")
-                del frame_bgr
-            except Exception:
-                log.debug("二维码检测异常", exc_info=True)
+    # ---- 4. 点击授权登录按钮 1 ----
+    time.sleep(2)
+    auth_bounds = bottom_half_bounds(vw, vh)
+    if not nav.find_and_click("game_auth_login_1.png", timeout=10, bounds=auth_bounds, max_retries=3):
+        on_status("⚠️ 找不到授权登录按钮 1，将重试")
+        return False
+    on_status("已点击授权登录 1")
 
-            # 15 秒内未出现二维码 → 返回失败，触发重试
-            if time.time() - start > QR_CODE_TIMEOUT:
-                on_status("⚠️ 未检测到登录二维码，将重试")
-                return False
-        elif on_qr and time.time() - last_qr_push >= 8:
-            # 已回到平台页则不必再推旧码到 GUI
-            if not platform_template_visible(nav, template_file, bounds=platform_bounds):
-                try:
-                    frame_bgr = capture_viewport_bgr(nav.driver)
-                    image = crop_qr_from_bgr(frame_bgr) if frame_bgr is not None else None
-                    if image is not None:
-                        on_qr(image)
-                        last_qr_push = time.time()
-                except Exception:
-                    log.debug("刷新游戏二维码失败", exc_info=True)
+    # ---- 5. 点击授权登录按钮 2 ----
+    time.sleep(2)
+    vw, vh = nav.viewport_size()
+    auth_bounds = bottom_half_bounds(vw, vh)
+    if not nav.find_and_click("game_auth_login_2.png", timeout=10, bounds=auth_bounds, max_retries=3):
+        on_status("⚠️ 找不到授权登录按钮 2，将重试")
+        return False
+    on_status("已点击授权登录 2")
 
-        time.sleep(2)
+    # ---- 6. 点击进入游戏 ----
+    time.sleep(2)
+    if nav.find_and_click("enter_game.png", timeout=10):
+        on_status("✅ 已点击进入游戏")
+        time.sleep(3)
+        return True
 
-    on_status("⚠️ 游戏登录扫码超时")
+    on_status("⚠️ 未找到进入游戏按钮")
     return False
