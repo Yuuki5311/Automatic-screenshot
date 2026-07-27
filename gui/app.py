@@ -34,8 +34,7 @@ class App(tk.Tk):
 
         # ---- 状态 ----
         self._platform_logged_in = False  # 腾讯先锋是否已登录
-        self._is_rerun = False            # 是否为再跑一轮
-        self._driver = None               # 跨轮次复用的 WebDriver
+        self._driver = None               # WebDriver 实例
 
         # ---- 平台选择（首页直接选定） ----
         self._platform_choice = None
@@ -134,64 +133,21 @@ class App(tk.Tk):
         self._log_view = LogView(self._page_progress)
         self._log_view.pack(fill="both", expand=True)
 
-        # ---- 页面 4: 完成页 ----
-        self._page_done = ttk.Frame(self._page_container)
-        self._done_summary = ttk.Label(
-            self._page_done, text="", font=("", 12)
-        )
-        self._done_summary.pack(pady=(30, 5))
+        # ---- 页面 4: 完成页（已移除，完成后回到待命页） ----
 
-        # 下一轮确认区
-        self._next_round_frame = ttk.LabelFrame(self._page_done, text="是否执行下一轮？", padding=10)
-        self._next_round_frame.pack(pady=10, fill="x", padx=20)
-
-        # 登录方式
-        ttk.Label(self._next_round_frame, text="登录方式：").pack(anchor="w")
-        self._next_login_type = tk.StringVar(value="qq")
-        next_login_frame = ttk.Frame(self._next_round_frame)
-        next_login_frame.pack(anchor="w", pady=(0, 8))
-        ttk.Radiobutton(next_login_frame, text="QQ", variable=self._next_login_type, value="qq").pack(side="left", padx=(0, 10))
-        ttk.Radiobutton(next_login_frame, text="微信", variable=self._next_login_type, value="wechat").pack(side="left")
-
-        ttk.Label(self._next_round_frame, text="账号：").pack(anchor="w")
-        self._next_account_var = tk.StringVar()
-        ttk.Entry(self._next_round_frame, textvariable=self._next_account_var, width=30).pack(fill="x", pady=(0, 8))
-
-        ttk.Label(self._next_round_frame, text="平台：").pack(anchor="w")
-        self._next_platform_var = tk.StringVar(value="qq_ios")
-        next_platforms = [
-            ("🟢 微信 iOS", "wx_ios"),
-            ("🟢 微信安卓", "wx_android"),
-            ("🔵 QQ iOS", "qq_ios"),
-            ("🔵 QQ 安卓", "qq_android"),
-        ]
-        for text, value in next_platforms:
-            ttk.Radiobutton(
-                self._next_round_frame, text=text,
-                variable=self._next_platform_var, value=value
-            ).pack(anchor="w", pady=1)
-
-        next_btn_frame = ttk.Frame(self._page_done)
-        next_btn_frame.pack(pady=10)
-        ttk.Button(
-            next_btn_frame, text="确认执行下一轮",
-            command=self._on_next_round, width=18
-        ).pack(side="left", padx=5)
-        ttk.Button(
-            next_btn_frame, text="退 出",
-            command=self._on_close, width=15
-        ).pack(side="left", padx=5)
-
-        # ---- 底部退出按钮 ----
+        # ---- 底部按钮 ----
         bottom = ttk.Frame(self)
         bottom.pack(fill="x", padx=10, pady=(0, 10))
+        self._rerun_btn = ttk.Button(
+            bottom, text="再执行一轮", command=self._on_start
+        )
         self._exit_btn = ttk.Button(
             bottom, text="退 出", command=self._on_close
         )
         self._manual_login_btn = ttk.Button(
             bottom, text="完成登录 →", command=self._on_manual_login_done
         )
-        # 初始隐藏，仅手动登录时通过 pack 显示
+        # 初始显示退出按钮，再执行一轮按钮在完成前隐藏
         self._exit_btn.pack(side="right")
 
         # 默认显示待命页
@@ -204,14 +160,13 @@ class App(tk.Tk):
     def _show_page(self, name: str):
         """显示指定页面，隐藏其余。"""
         for page in [self._page_idle, self._page_qr,
-                     self._page_progress, self._page_done]:
+                     self._page_progress]:
             page.pack_forget()
 
         mapping = {
             "idle": self._page_idle,
             "qr": self._page_qr,
             "progress": self._page_progress,
-            "done": self._page_done,
         }
         page = mapping.get(name)
         if page:
@@ -234,6 +189,7 @@ class App(tk.Tk):
         self._show_page("progress")
         self._log_view.add_log("启动任务...", "info")
         self._exit_btn.config(state="normal")
+        self._rerun_btn.pack_forget()  # 运行时隐藏再执行一轮按钮
 
         # 启动前在主线程锁定选项（避免后台线程读 Tk 变量）
         self._platform_choice = self._platform_var.get()
@@ -249,33 +205,6 @@ class App(tk.Tk):
             target=self._run_workflow, daemon=True
         )
         self._worker_thread.start()
-
-    def _on_next_round(self):
-        """完成页点击「确认执行下一轮」—— 用新设置开始。"""
-        old_login_type = self._login_type.get()
-        new_login_type = self._next_login_type.get()
-
-        # 更新登录方式、账号、平台
-        self._login_type.set(new_login_type)
-        new_account = self._next_account_var.get().strip()
-        if new_account:
-            self._account_var.set(new_account)
-        new_platform = self._next_platform_var.get()
-        self._platform_var.set(new_platform)
-        self._platform_choice = new_platform
-
-        # 登录方式变化 → 需要重新登录腾讯先锋（旧浏览器作废）
-        if new_login_type != old_login_type:
-            self._platform_logged_in = False
-            if self._driver is not None:
-                try:
-                    self._driver.quit()
-                except Exception:
-                    pass
-                self._driver = None
-
-        self._is_rerun = True
-        self._on_start()
 
     def _on_close(self):
         """关闭窗口。"""
@@ -348,12 +277,9 @@ class App(tk.Tk):
             self._show_page(msg["name"])
 
         elif msg_type == "done":
-            self._show_page("done")
-            self._done_summary.config(text=msg["text"])
-            # 预填新一轮的选项（沿用当前选择）
-            self._next_login_type.set(self._login_type.get())
-            self._next_account_var.set("")
-            self._next_platform_var.set(self._platform_var.get())
+            self._send({"type": "log", "text": msg["text"], "level": "success"})
+            self._show_page("idle")
+            self._rerun_btn.pack(side="left", padx=(0, 5))
 
     # ------------------------------------------------------------------
     # 后台工作流
@@ -573,57 +499,6 @@ class App(tk.Tk):
                             "level": "info",
                         })
                     self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
-                monitor = None
-
-            elif self._is_rerun:
-                # 再跑一轮：跳过阶段 1-2，直接从退出当前登录开始
-                self._is_rerun = False
-                if self._stop_event.is_set():
-                    return
-
-                if driver is None:
-                    _log.error("[再跑一轮] 浏览器实例丢失，无法继续")
-                    self._send({"type": "log", "text": "❌ 浏览器已关闭，请重新从待命页启动", "level": "error"})
-                    self._send({"type": "done", "text": "❌ 浏览器实例丢失，请重新启动"})
-                    self._platform_logged_in = False
-                    return
-
-                self._send({"type": "log", "text": "正在退出当前游戏登录...", "level": "info"})
-                _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
-
-                self._send({"type": "log", "text": "启动预退出感知环..."})
-                pre = run_pre_logout_loop(
-                    _nav,
-                    stop_event=self._stop_event,
-                    timeout_s=30.0,
-                    tick_s=2.0,
-                    on_log=lambda text, level="info": self._send(
-                        {"type": "log", "text": text, "level": level}
-                    ),
-                )
-                if pre.logout_clicked:
-                    self._send({
-                        "type": "log",
-                        "text": (
-                            f"预退出完成（确认: {pre.confirm_clicked}）"
-                            if pre.confirm_clicked
-                            else "预退出完成（未检测到确认弹窗）"
-                        ),
-                        "level": "success",
-                    })
-                elif pre.timed_out:
-                    self._send({
-                        "type": "log",
-                        "text": "未检测到退出按钮（已超时），关闭预退出环，继续选择平台",
-                        "level": "warn",
-                    })
-                else:
-                    self._send({
-                        "type": "log",
-                        "text": "未检测到退出按钮（已在平台页），关闭预退出环，继续选择平台",
-                        "level": "info",
-                    })
-                self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
                 monitor = None
 
             # ====== 阶段 3: 游戏内登录 + 截图 ======
@@ -886,67 +761,21 @@ class App(tk.Tk):
             self._send({"type": "progress", "current": total, "total": total})
             self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})
 
-            # ====== 退出游戏登录 ======
-            self._send({"type": "log", "text": "正在退出游戏登录...", "level": "info"})
-            LOGOUT_MAX_RETRIES = 3
-
-            for logout_attempt in range(1, LOGOUT_MAX_RETRIES + 1):
-                if self._stop_event.is_set():
-                    return
-
-                # 1. 点击右上角设置按钮（bounds 按实际截图像素）
-                vw, vh = nav.viewport_size()
-                settings_bounds = (
-                    int(vw * 0.8), 0,
-                    int(vw * 0.2), int(vh * 0.3),
-                )
-                if not nav.find_and_click("settings_icon.png", timeout=5, bounds=settings_bounds):
-                    self._send({"type": "log", "text": f"未找到设置按钮，重试 ({logout_attempt}/{LOGOUT_MAX_RETRIES})...", "level": "warn"})
-                    time.sleep(2)
-                    continue
-
-                self._send({"type": "log", "text": "已点击设置"})
-                time.sleep(2)
-
-                # 2. 点击右下角「退出登录」
-                vw, vh = nav.viewport_size()
-                logout_bounds = (
-                    0, int(vh * 0.6),
-                    vw, int(vh * 0.4),
-                )
-                if not nav.find_and_click("settings_logout.png", timeout=5, bounds=logout_bounds):
-                    # settings_logout 未匹配则点屏幕下方
-                    nav.click_css(vw // 2, int(vh * 0.8))
-                    self._send({"type": "log", "text": f"未找到退出登录按钮，重试 ({logout_attempt}/{LOGOUT_MAX_RETRIES})...", "level": "warn"})
-                    time.sleep(2)
-                    continue
-
-                self._send({"type": "log", "text": "已点击退出登录"})
-                time.sleep(2)
-
-                # 3. 确认退出（确定 / 同意）
-                hit = click_confirm_dialog(nav, wait_after=2.0)
-                if hit:
-                    self._send({"type": "log", "text": f"已确认退出登录（{hit}）"})
-                else:
-                    self._send({"type": "log", "text": "未找到退出确认按钮", "level": "warn"})
-                break
-
-            self._send({"type": "log", "text": "已退出游戏登录", "level": "info"})
-
-            # 退出后同步清理残留弹窗，避免带入下一轮
-            if monitor is not None:
-                monitor.pause()
-                self._send({"type": "log", "text": "正在清理退出后残留弹窗..."})
-                monitor.close_all_popups()
-                time.sleep(3)
-                monitor.close_all_popups()
-                monitor.wait_until_clear(3)
-                self._send({"type": "log", "text": "残留弹窗清理完成", "level": "success"})
+            # ====== 截图完成，关闭浏览器 ======
+            self._send({"type": "log", "text": "截图完成，正在关闭浏览器...", "level": "info"})
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                driver = None
+            self._driver = None
+            self._platform_logged_in = False
+            self._send({"type": "log", "text": "浏览器已关闭", "level": "success"})
 
             self._send({
                 "type": "done",
-                "text": f"✅ 本轮完成: {success}/{total} 张截图\n已退出游戏登录"
+                "text": f"✅ 本轮完成: {success}/{total} 张截图"
             })
 
         except Exception as e:
@@ -962,7 +791,14 @@ class App(tk.Tk):
                 _nav.cleanup()
             if nav is not None:
                 nav.cleanup()
-            # 浏览器保持打开，方便下一轮直接复用
+            # 兜底：确保浏览器已关闭
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                driver = None
+            self._driver = None
 
     # ------------------------------------------------------------------
     # 启动

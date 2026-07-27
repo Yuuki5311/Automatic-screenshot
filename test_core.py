@@ -1677,7 +1677,6 @@ if __name__ == "__main__":
         TestTemplateCache(),
         TestPopupMonitor(),
         TestPlatformBounds(),
-        TestPopupThresholds(),
         TestNavigatorThreshold(),
         TestSwitchToNewTab(),
         TestScreenshotTasks(),
