@@ -612,8 +612,8 @@ class App(tk.Tk):
             monitor.wait_until_clear(3)
             self._send({"type": "log", "text": "弹窗清理完毕，验证游戏主界面..."})
 
-            if not nav.wait_for_template("avatar.png", timeout=15):
-                _log.error("[阶段3] 游戏登录验证失败：未检测到主界面头像")
+            if not nav.wait_for_template("game_main.png", timeout=15):
+                _log.error("[阶段3] 游戏登录验证失败：未检测到游戏主界面")
                 self._send({"type": "log", "text": "❌ 未进入游戏主界面，登录可能失败", "level": "error"})
                 self._send({"type": "done", "text": "❌ 未进入游戏主界面"})
                 return
@@ -725,7 +725,7 @@ class App(tk.Tk):
                 while time.time() - start < 60:
                     if self._stop_event.is_set():
                         return False
-                    if nav.wait_for_template("avatar.png", timeout=2):
+                    if nav.wait_for_template("game_main.png", timeout=2):
                         self._send({"type": "log", "text": "检测到游戏主界面，无需重新登录", "level": "info"})
                         return True
                     for tpl in game_templates:
