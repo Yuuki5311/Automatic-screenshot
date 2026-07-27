@@ -761,8 +761,26 @@ class App(tk.Tk):
             self._send({"type": "progress", "current": total, "total": total})
             self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})
 
-            # ====== 截图完成，关闭浏览器 ======
-            self._send({"type": "log", "text": "截图完成，正在关闭浏览器...", "level": "info"})
+            # ====== 截图完成，关闭云游戏并退出浏览器 ======
+            self._send({"type": "log", "text": "正在关闭云游戏标签页...", "level": "info"})
+            try:
+                handles = driver.window_handles
+                if len(handles) > 1:
+                    # Step 1: 关闭云游戏标签页（触发 TCP RST，服务端回收容器）
+                    driver.close()
+                    # Step 2: 切回先锋首页，清 Storage 破坏重连上下文
+                    driver.switch_to.window(handles[0])
+                    try:
+                        driver.execute_script(
+                            "localStorage.clear(); sessionStorage.clear();")
+                    except Exception:
+                        pass
+                    self._send({"type": "log", "text": "云游戏标签页已关闭，Storage 已清理", "level": "success"})
+            except Exception:
+                self._send({"type": "log", "text": "关闭云游戏标签页失败", "level": "warn"})
+
+            # Step 3: 关闭整个浏览器
+            self._send({"type": "log", "text": "正在关闭浏览器...", "level": "info"})
             if driver is not None:
                 try:
                     driver.quit()
