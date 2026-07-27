@@ -457,18 +457,24 @@ class TestGameLoginPlatformFallback:
             if tpl == "game_qq_ios.png":
                 platform_hits["n"] += 1
                 return platform_hits["n"] >= 2
-            if tpl == "enter_game.png":
+            # 授权登录按钮 + enter_game 全部命中（完整 auth flow）
+            if tpl in ("game_auth_login_1.png", "game_auth_login_2.png", "enter_game.png"):
                 return True
             return False
 
         nav.find_and_click.side_effect = find_and_click
 
+        # enter_game 快速通道排在最前；此测试验证平台回退流，让 enter_game 不可见
+        _enter_game_calls = {"n": 0}
+
         def wait_for_template(tpl, **kwargs):
+            if tpl == "enter_game.png":
+                # 前两次不可见（让快速通道失效），之后可见
+                _enter_game_calls["n"] += 1
+                return _enter_game_calls["n"] >= 3
             if tpl == "game_logout_btn.png":
                 return True
             if tpl == "avatar.png":
-                return True
-            if tpl == "enter_game.png":
                 return True
             return False
 
@@ -477,7 +483,7 @@ class TestGameLoginPlatformFallback:
 
         assert game_login(nav, "qq_ios", on_status=statuses.append) is True
         mock_pre.assert_called_once()
-        assert platform_hits["n"] == 2
+        assert platform_hits["n"] == 3  # step1失败 + retry成功 + step3再点
         assert any("退出" in s for s in statuses)
 
     @patch("login.time.sleep", return_value=None)

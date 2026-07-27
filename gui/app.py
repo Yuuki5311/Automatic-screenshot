@@ -378,6 +378,7 @@ class App(tk.Tk):
         try:
             _log.info("工作流线程启动")
             self._send({"type": "log", "text": "正在加载组件..."})
+            _entered_via_fast_path = False
             # 依赖应已在 main 主线程预加载；此处再导入以便开发模式懒加载
             from browser import create_browser
             from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path, writable_path
@@ -512,7 +513,7 @@ class App(tk.Tk):
 
                 self._send({"type": "log", "text": "✅ 已切换到云游戏标签页", "level": "success"})
 
-                # ---- 粗清初始弹窗 + 预退出感知环（弹窗优先 → 点退出 → 确认） ----
+                # ---- 粗清初始弹窗 → enter_game 快速通道 → 预退出感知环 ----
                 self._send({"type": "log", "text": "等待 10 秒后清除初始弹窗..."})
                 time.sleep(10)
                 _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
@@ -520,39 +521,58 @@ class App(tk.Tk):
                 _nav.click_css(vw // 2, int(vh * 0.85))
                 self._send({"type": "log", "text": "已尝试清除弹窗"})
 
-                self._send({"type": "log", "text": "启动预退出感知环..."})
-                pre = run_pre_logout_loop(
-                    _nav,
-                    stop_event=self._stop_event,
-                    timeout_s=30.0,
-                    tick_s=2.0,
-                    on_log=lambda text, level="info": self._send(
-                        {"type": "log", "text": text, "level": level}
-                    ),
-                )
-                if pre.logout_clicked:
+                # 优先检查 enter_game：已登录的游戏会话直接进入即可，无需退出重登
+                _entered_via_fast_path = False
+                if _nav.wait_for_template("enter_game.png", timeout=5):
                     self._send({
                         "type": "log",
-                        "text": (
-                            f"预退出完成（确认: {pre.confirm_clicked}）"
-                            if pre.confirm_clicked
-                            else "预退出完成（未检测到确认弹窗）"
-                        ),
+                        "text": "检测到进入游戏按钮，跳过预退出环，点击进入...",
                         "level": "success",
                     })
-                elif pre.timed_out:
+                    _nav.find_and_click("enter_game.png", timeout=5)
                     self._send({
                         "type": "log",
-                        "text": "未检测到退出按钮（已超时），关闭预退出环，继续选择平台",
-                        "level": "warn",
+                        "text": "✅ 已点击进入游戏",
+                        "level": "success",
                     })
+                    time.sleep(3)
+                    _nav.cleanup()
+                    _entered_via_fast_path = True
                 else:
-                    self._send({
-                        "type": "log",
-                        "text": "未检测到退出按钮（已在平台页），关闭预退出环，继续选择平台",
-                        "level": "info",
-                    })
-                self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
+                    self._send({"type": "log", "text": "未检测到进入游戏按钮，启动预退出感知环..."})
+                    pre = run_pre_logout_loop(
+                        _nav,
+                        stop_event=self._stop_event,
+                        timeout_s=30.0,
+                        tick_s=2.0,
+                        on_log=lambda text, level="info": self._send(
+                            {"type": "log", "text": text, "level": level}
+                        ),
+                    )
+                    _nav.cleanup()
+                    if pre.logout_clicked:
+                        self._send({
+                            "type": "log",
+                            "text": (
+                                f"预退出完成（确认: {pre.confirm_clicked}）"
+                                if pre.confirm_clicked
+                                else "预退出完成（未检测到确认弹窗）"
+                            ),
+                            "level": "success",
+                        })
+                    elif pre.timed_out:
+                        self._send({
+                            "type": "log",
+                            "text": "未检测到退出按钮（已超时），关闭预退出环，继续选择平台",
+                            "level": "warn",
+                        })
+                    else:
+                        self._send({
+                            "type": "log",
+                            "text": "未检测到退出按钮（已在平台页），关闭预退出环，继续选择平台",
+                            "level": "info",
+                        })
+                    self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
                 monitor = None
 
             elif self._is_rerun:
@@ -625,8 +645,14 @@ class App(tk.Tk):
             nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
 
             # ====== 阶段 3: 游戏登录（最多重试 3 次） ======
+            # 若阶段 2 快速通道已点击 enter_game，跳过 game_login 直接进入清理流程
+            if _entered_via_fast_path:
+                self._send({"type": "log", "text": "快速通道已进入游戏，跳过游戏登录阶段", "level": "info"})
+                game_login_ok = True
+            else:
+                game_login_ok = False
+
             GAME_LOGIN_MAX_RETRIES = 3
-            game_login_ok = False
 
             platform = self._platform_choice or "qq_ios"
 
@@ -660,21 +686,22 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": text,
                             "level": "success" if "成功" in text else "info"})
 
-            for attempt in range(1, GAME_LOGIN_MAX_RETRIES + 1):
-                if attempt > 1:
-                    self._send({"type": "log", "text": f"游戏登录重试 ({attempt}/{GAME_LOGIN_MAX_RETRIES})...", "level": "warn"})
+            if not game_login_ok:
+                for attempt in range(1, GAME_LOGIN_MAX_RETRIES + 1):
+                    if attempt > 1:
+                        self._send({"type": "log", "text": f"游戏登录重试 ({attempt}/{GAME_LOGIN_MAX_RETRIES})...", "level": "warn"})
 
-                # 停止旧的弹窗监控（如有），阶段3不启动后台监控
-                if monitor is not None:
-                    monitor.stop()
-                    monitor = None
+                    # 停止旧的弹窗监控（如有），阶段3不启动后台监控
+                    if monitor is not None:
+                        monitor.stop()
+                        monitor = None
 
-                _log.info(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES}, platform={platform}")
-                if game_login(nav, platform, on_game_qr, on_game_status):
-                    game_login_ok = True
-                    break
-                else:
-                    _log.warning(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES} 失败")
+                    _log.info(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES}, platform={platform}")
+                    if game_login(nav, platform, on_game_qr, on_game_status):
+                        game_login_ok = True
+                        break
+                    else:
+                        _log.warning(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES} 失败")
 
             if not game_login_ok:
                 _log.error("[阶段3] 游戏登录失败（3次重试已用完）")
@@ -692,8 +719,9 @@ class App(tk.Tk):
 
             # 先处理返回箭头：点进入游戏后可能停在子页面
             ARROW_TIMEOUT = 5
+            ARROW_THRESHOLD = 0.75
             while True:
-                if nav.find_and_click("back_arrow.png", timeout=ARROW_TIMEOUT, max_retries=1):
+                if nav.find_and_click("back_arrow.png", timeout=ARROW_TIMEOUT, max_retries=1, threshold=ARROW_THRESHOLD):
                     self._send({"type": "log", "text": "已点击返回箭头，继续检查..."})
                     time.sleep(1)
                     continue

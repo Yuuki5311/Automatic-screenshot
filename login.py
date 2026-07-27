@@ -537,6 +537,14 @@ def game_login(
         on_status(f"未知的平台选择: {platform}")
         return False
 
+    # ---- 0. 快速检测 enter_game（已登录会话直接进入，最高优先） ----
+    if nav.wait_for_template("enter_game.png", timeout=3):
+        on_status("检测到进入游戏按钮，直接进入...")
+        if nav.find_and_click("enter_game.png", timeout=5):
+            on_status("✅ 已点击进入游戏")
+            time.sleep(3)
+            return True
+
     # ---- 按实际截图像素计算搜索区域（下半屏：微信左 / QQ 右） ----
     vw, vh = nav.viewport_size()
     platform_bounds = platform_select_bounds(vw, vh, platform)
@@ -572,14 +580,6 @@ def game_login(
             return False
 
     on_status(f"已选择 {platform_name} 登录")
-
-    # ---- 1a. 快速检测 enter_game ----
-    if nav.wait_for_template("enter_game.png", timeout=2):
-        on_status("检测到进入游戏按钮，直接进入...")
-        if nav.find_and_click("enter_game.png", timeout=5):
-            on_status("✅ 已点击进入游戏")
-            time.sleep(3)
-            return True
 
     # ---- 2. 感知环清弹窗 ----
     on_status("清理弹窗...")
