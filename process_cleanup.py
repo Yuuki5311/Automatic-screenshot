@@ -295,59 +295,48 @@ def unregister_driver(driver) -> None:
 def cleanup_orphans() -> None:
     """启动时扫描并清理上一次运行可能残留的驱动和浏览器进程。
 
-    杀掉所有孤儿 msedgedriver.exe 及其子孙 msedge.exe 进程。
-    非 Windows 平台直接返回。
-    失败静默忽略，不阻止程序启动。
+    两轮扫描：
+      1. 找到所有孤儿 msedgedriver.exe → 杀整个进程树
+      2. 找到所有父进程已死的孤儿 msedge.exe → 逐个强杀
+
+    非 Windows 平台直接返回。失败静默忽略，不阻止程序启动。
     """
     if platform.system() != "Windows":
         return
 
     try:
-        # 1. 找到所有孤儿 msedgedriver.exe
-        result = subprocess.run(
-            [
-                "wmic", "process", "where", "name='msedgedriver.exe'",
-                "get", "ProcessId",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        orphan_drivers: list[str] = []
-        for line in result.stdout.splitlines():
-            text = line.strip()
-            if text.isdigit():
-                orphan_drivers.append(text)
+        killed_any = False
 
-        if not orphan_drivers:
-            return
+        # ---- 第 1 轮：孤儿 msedgedriver.exe ----
+        orphan_drivers = _all_pids_by_name("msedgedriver.exe")
+        if orphan_drivers:
+            log.info(f"发现孤儿 msedgedriver.exe: {orphan_drivers}")
+            # 收集整个进程树再杀
+            all_pids: set[int] = set(orphan_drivers)
+            for pid in orphan_drivers:
+                for tpid in _find_all_descendant_pids(pid):
+                    all_pids.add(tpid)
+            for pid in all_pids:
+                _kill_pid(pid)
+            killed_any = True
 
-        log.info(f"启动时清理孤儿进程: msedgedriver.exe={orphan_drivers}")
+        # ---- 第 2 轮：孤儿 msedge.exe（父进程已死） ----
+        all_edge = _all_pids_by_name("msedge.exe")
+        orphan_edge: list[int] = []
+        for pid in all_edge:
+            ppid = _get_parent_pid(pid)
+            if ppid is not None and ppid > 0 and not _process_exists(ppid):
+                # 父进程不存在 → 孤儿
+                orphan_edge.append(pid)
 
-        # 2. 先收集所有孤儿 driver 的进程树（在杀之前）
-        all_orphan_pids: set[str] = set(orphan_drivers)
-        for pid_str in orphan_drivers:
-            tree = _find_all_descendant_pids(int(pid_str))
-            for tpid in tree:
-                all_orphan_pids.add(str(tpid))
+        if orphan_edge:
+            log.info(f"发现孤儿 msedge.exe (父进程已死): {orphan_edge}")
+            for pid in orphan_edge:
+                _kill_pid(pid)
+            killed_any = True
 
-        # 3. 杀进程树中所有 PID
-        for pid_str in all_orphan_pids:
-            subprocess.run(
-                ["taskkill", "/F", "/PID", pid_str],
-                capture_output=True,
-                timeout=10,
-            )
-
-        # 4. 全局兜底
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "msedgedriver.exe"],
-            capture_output=True, timeout=10,
-        )
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "msedge.exe"],
-            capture_output=True, timeout=10,
-        )
+        if not killed_any:
+            log.debug("启动扫描：未发现孤儿进程")
     except Exception:
         pass  # 清理失败不应阻止启动
 
@@ -355,6 +344,59 @@ def cleanup_orphans() -> None:
 # ---------------------------------------------------------------------------
 # 三级降级清理
 # ---------------------------------------------------------------------------
+
+
+def _process_exists(pid: int) -> bool:
+    """检查指定 PID 的进程是否存在（Windows）。"""
+    if platform.system() != "Windows":
+        return False
+    kernel32 = ctypes.windll.kernel32
+    SYNCHRONIZE = 0x100000
+    h = kernel32.OpenProcess(
+        wintypes.DWORD(SYNCHRONIZE), wintypes.BOOL(False), wintypes.DWORD(pid),
+    )
+    if h:
+        kernel32.CloseHandle(wintypes.HANDLE(h))
+        return True
+    return False
+
+
+def _all_pids_by_name(name: str) -> list[int]:
+    """通过 WMIC 查找指定名称的所有进程 PID。"""
+    if platform.system() != "Windows":
+        return []
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where", f"name='{name}'", "get", "ProcessId"],
+            capture_output=True, text=True, timeout=10,
+        )
+        pids: list[int] = []
+        for line in result.stdout.splitlines():
+            text = line.strip()
+            if text.isdigit():
+                pids.append(int(text))
+        return pids
+    except Exception:
+        return []
+
+
+def _get_parent_pid(pid: int) -> int | None:
+    """查询指定 PID 的父进程 PID。"""
+    if platform.system() != "Windows":
+        return None
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where", f"ProcessId={pid}",
+             "get", "ParentProcessId"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in result.stdout.splitlines():
+            text = line.strip()
+            if text.isdigit():
+                return int(text)
+        return None
+    except Exception:
+        return None
 
 
 def _kill_pid(pid: int) -> bool:
@@ -374,12 +416,12 @@ def _kill_pid(pid: int) -> bool:
             return False
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["taskkill", "/F", "/PID", str(pid)],
             capture_output=True,
             timeout=10,
         )
-        return True
+        return result.returncode == 0
     except Exception:
         return False
 
