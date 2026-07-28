@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import atexit
 import ctypes
 import os
 import platform
@@ -36,11 +35,6 @@ _PROCESS_TERMINATE = 0x0001
 # ---------------------------------------------------------------------------
 # Windows Job Object (内核级保障)
 # ---------------------------------------------------------------------------
-
-
-def _get_python_pid() -> int:
-    """获取当前 Python 进程 PID。"""
-    return os.getpid()
 
 
 def create_job_object() -> int | None:
@@ -354,7 +348,7 @@ def _kill_by_name(name: str) -> bool:
         return False
 
 
-def _force_kill(info: dict) -> None:
+def _force_kill(driver_pid: int, info: dict) -> None:
     """对单个 driver 执行三级降级清理。
 
     Level 1: driver.quit() (优雅退出)
@@ -374,22 +368,20 @@ def _force_kill(info: dict) -> None:
             log.debug("driver.quit() 失败，进入 Level 2", exc_info=True)
 
     # Level 2: 按 PID 精确强杀
-    # 从 _drivers 中找对应的 driver_pid
-    for driver_pid, stored in list(_drivers.items()):
-        if stored is info:
-            if not _kill_pid(driver_pid):
-                log.debug(f"Level 2 杀 driver PID={driver_pid} 失败")
-            break
+    if driver_pid is not None and driver_pid > 0:
+        if not _kill_pid(driver_pid):
+            log.debug(f"Level 2 杀 driver PID={driver_pid} 失败")
 
     for bpid in browser_pids:
         _kill_pid(bpid)
 
-    # 短暂等待后检查是否还有残留
-    time.sleep(1)
+    # 短暂等待后检查（仅当有进程被强杀时）
+    if driver_pid or browser_pids:
+        time.sleep(1)
 
     # Level 3: 镜像名全局兜底（仅 msedgedriver.exe）
     if platform.system() == "Windows":
-        log.warning("Level 2 可能未完全清理，执行 Level 3 全局兜底")
+        log.info("执行 Level 3 全局兜底（msedgedriver.exe）")
         _kill_by_name("msedgedriver.exe")
 
 
@@ -404,6 +396,6 @@ def cleanup_all() -> None:
             info = _drivers.pop(driver_pid, None)
             if info is None:
                 continue
-            _force_kill(info)
+            _force_kill(driver_pid, info)
     except Exception:
         log.error("cleanup_all 异常", exc_info=True)
