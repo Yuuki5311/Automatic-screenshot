@@ -160,15 +160,8 @@ def assign_to_job(job_handle: int, pid: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _find_child_pids(parent_pid: int) -> list[int]:
-    """通过 WMIC 查找指定 PID 的所有子进程 PID。
-
-    Args:
-        parent_pid: 父进程 PID。
-
-    Returns:
-        list[int]: 子进程 PID 列表（可能为空）。
-    """
+def _find_direct_children(parent_pid: int) -> list[int]:
+    """通过 WMIC 查找指定 PID 的直接子进程 PID。"""
     if platform.system() != "Windows":
         return []
     try:
@@ -193,13 +186,56 @@ def _find_child_pids(parent_pid: int) -> list[int]:
         return []
 
 
+def _find_all_descendant_pids(root_pid: int) -> list[int]:
+    """递归查找指定 PID 的整个进程树（所有子孙进程）。
+
+    Edge 进程树示例:
+        msedgedriver.exe (root)
+          ├── msedge.exe           ← 直接子进程
+          │     ├── msedge.exe     ← 孙进程（渲染器）
+          │     ├── msedge.exe     ← 孙进程（GPU）
+          │     └── msedge.exe     ← 孙进程（网络）
+          └── msedge.exe           ← 直接子进程
+
+    仅查直接子进程会漏掉孙进程，导致退出时残留。
+
+    Args:
+        root_pid: 进程树的根 PID。
+
+    Returns:
+        list[int]: 整个进程树中所有 PID（含根自身）。
+    """
+    if platform.system() != "Windows":
+        return [root_pid] if root_pid > 0 else []
+
+    all_pids: set[int] = {root_pid}
+    frontier = [root_pid]
+    depth = 0
+    max_depth = 10  # 安全上限，Edge 进程树通常 ≤4 层
+
+    while frontier and depth < max_depth:
+        next_frontier: list[int] = []
+        for pid in frontier:
+            children = _find_direct_children(pid)
+            for child in children:
+                if child not in all_pids:
+                    all_pids.add(child)
+                    next_frontier.append(child)
+        frontier = next_frontier
+        depth += 1
+
+    result = list(all_pids)
+    log.debug(f"进程树 root={root_pid}: {result} (深度={depth})")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 注册 / 反注册
 # ---------------------------------------------------------------------------
 
 
 def register_driver(driver) -> None:
-    """记录 WebDriver 进程信息，并将其子进程加入 Job Object。
+    """记录 WebDriver 进程信息，并将其整个进程树加入 Job Object。
 
     Args:
         driver: Selenium WebDriver 实例 (webdriver.Edge 或 webdriver.Chrome)。
@@ -214,24 +250,24 @@ def register_driver(driver) -> None:
         return
 
     # 等待子进程出现
-    time.sleep(0.5)
+    time.sleep(1.0)
 
-    browser_pids = _find_child_pids(driver_pid)
+    # 递归获取整个进程树（含孙进程——Edge 渲染/GPU/网络进程等）
+    all_pids = _find_all_descendant_pids(driver_pid)
     log.info(
-        f"注册 driver PID={driver_pid}, browser 子进程={browser_pids}"
+        f"注册 driver PID={driver_pid}, 进程树={all_pids}"
     )
 
     _drivers[driver_pid] = {
         "driver": driver,
-        "browser_pids": browser_pids,
+        "all_pids": all_pids,
     }
 
-    # 加入 Job Object（内核级保障）
+    # 整个进程树加入 Job Object（内核级保障）
     job = _job_handle
     if job is not None:
-        assign_to_job(job, driver_pid)
-        for bpid in browser_pids:
-            assign_to_job(job, bpid)
+        for pid in all_pids:
+            assign_to_job(job, pid)
 
 
 def unregister_driver(driver) -> None:
@@ -257,9 +293,9 @@ def unregister_driver(driver) -> None:
 
 
 def cleanup_orphans() -> None:
-    """启动时扫描并清理上一次运行可能残留的 msedgedriver.exe。
+    """启动时扫描并清理上一次运行可能残留的驱动和浏览器进程。
 
-    只杀 msedgedriver.exe，不杀 msedge.exe（用户可能有其他 Edge 窗口）。
+    杀掉所有孤儿 msedgedriver.exe 及其子孙 msedge.exe 进程。
     非 Windows 平台直接返回。
     失败静默忽略，不阻止程序启动。
     """
@@ -267,6 +303,7 @@ def cleanup_orphans() -> None:
         return
 
     try:
+        # 1. 找到所有孤儿 msedgedriver.exe
         result = subprocess.run(
             [
                 "wmic", "process", "where", "name='msedgedriver.exe'",
@@ -276,20 +313,41 @@ def cleanup_orphans() -> None:
             text=True,
             timeout=10,
         )
-        pids: list[str] = []
+        orphan_drivers: list[str] = []
         for line in result.stdout.splitlines():
             text = line.strip()
             if text.isdigit():
-                pids.append(text)
+                orphan_drivers.append(text)
 
-        if pids:
-            log.info(f"启动时清理孤儿 msedgedriver.exe: {pids}")
-            for pid in pids:
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", pid],
-                    capture_output=True,
-                    timeout=10,
-                )
+        if not orphan_drivers:
+            return
+
+        log.info(f"启动时清理孤儿进程: msedgedriver.exe={orphan_drivers}")
+
+        # 2. 先收集所有孤儿 driver 的进程树（在杀之前）
+        all_orphan_pids: set[str] = set(orphan_drivers)
+        for pid_str in orphan_drivers:
+            tree = _find_all_descendant_pids(int(pid_str))
+            for tpid in tree:
+                all_orphan_pids.add(str(tpid))
+
+        # 3. 杀进程树中所有 PID
+        for pid_str in all_orphan_pids:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", pid_str],
+                capture_output=True,
+                timeout=10,
+            )
+
+        # 4. 全局兜底
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "msedgedriver.exe"],
+            capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "msedge.exe"],
+            capture_output=True, timeout=10,
+        )
     except Exception:
         pass  # 清理失败不应阻止启动
 
@@ -352,11 +410,10 @@ def _force_kill(driver_pid: int, info: dict) -> None:
     """对单个 driver 执行三级降级清理。
 
     Level 1: driver.quit() (优雅退出)
-    Level 2: taskkill /F /PID (精确强杀)
-    Level 3: taskkill /F /IM msedgedriver.exe (全局兜底)
+    Level 2: 实时扫描整个进程树 → taskkill /F /PID (精确强杀所有子孙)
+    Level 3: taskkill /F /IM msedgedriver.exe + msedge.exe (全局兜底)
     """
     driver = info.get("driver")
-    browser_pids: list[int] = info.get("browser_pids", [])
 
     # Level 1: 优雅退出
     if driver is not None:
@@ -367,22 +424,33 @@ def _force_kill(driver_pid: int, info: dict) -> None:
         except Exception:
             log.debug("driver.quit() 失败，进入 Level 2", exc_info=True)
 
-    # Level 2: 按 PID 精确强杀
+    # Level 2: 重新扫描整个进程树并强杀
+    # （不依赖注册时的快照——Edge 后续会不断创建新渲染进程）
     if driver_pid is not None and driver_pid > 0:
-        if not _kill_pid(driver_pid):
-            log.debug(f"Level 2 杀 driver PID={driver_pid} 失败")
+        all_pids = _find_all_descendant_pids(driver_pid)
+        log.info(f"Level 2: 强杀进程树 root={driver_pid}, pids={all_pids}")
+        for pid in all_pids:
+            _kill_pid(pid)
 
-    for bpid in browser_pids:
-        _kill_pid(bpid)
+        # 等待进程退出
+        if all_pids:
+            time.sleep(2)
 
-    # 短暂等待后检查（仅当有进程被强杀时）
-    if driver_pid or browser_pids:
-        time.sleep(1)
+        # 复查：还有存活的子孙进程吗？
+        survivors = _find_all_descendant_pids(driver_pid)
+        alive = [p for p in survivors if p != driver_pid]
+        if alive:
+            log.warning(f"Level 2 后仍有残留进程: {alive}，进入 Level 3")
+        else:
+            log.info("Level 2 进程树清理完成")
+            return
 
-    # Level 3: 镜像名全局兜底（仅 msedgedriver.exe）
+    # Level 3: 镜像名全局兜底
     if platform.system() == "Windows":
-        log.info("执行 Level 3 全局兜底（msedgedriver.exe）")
+        log.warning("执行 Level 3 全局兜底（msedgedriver.exe + msedge.exe）")
         _kill_by_name("msedgedriver.exe")
+        # msedge.exe 也做全局清理：此时已确认是残留，且 Level 2 已尽力精确杀
+        _kill_by_name("msedge.exe")
 
 
 def cleanup_all() -> None:
