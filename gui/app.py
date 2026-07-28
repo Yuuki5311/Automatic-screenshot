@@ -649,6 +649,7 @@ class App(tk.Tk):
                 ("万象图鉴首页", [
                     ("tab_illustrated.png", "点击图鉴标签"),
                     ("universal_illustrated.png", "点击万象图鉴"),
+                    ("__optional__", "congrats_popup.png", _avatar_xy, "恭贺弹窗"),
                 ], 0),
                 ("万象图鉴-灵宝", [
                     ("lingbao.png", "点击灵宝"),

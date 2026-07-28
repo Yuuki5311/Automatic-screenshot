@@ -633,6 +633,22 @@ class UiLoop:
                 clicked = execute_click_with_confirm(self.nav, plan)
                 if clicked:
                     self._log(f"  坐标点击 ({x}, {y})")
+            elif template == "__optional__":
+                # 可选弹窗：尝试匹配，有则点头像关闭，无则跳过
+                popup_tpl = desc
+                dismiss_xy = bounds
+                plan = plan_template_click(self.nav, screen, popup_tpl)
+                if plan is not None:
+                    self._log(
+                        f"  检测到 {popup_tpl} (置信度 {plan.score:.2f})，"
+                        f"点击坐标 ({dismiss_xy[0]}, {dismiss_xy[1]}) 关闭"
+                    )
+                    self.nav.click_css(*dismiss_xy)
+                    time.sleep(CLICK_INTERVAL)
+                else:
+                    self._log(f"  未检测到 {popup_tpl}，跳过")
+                self.goal.advance_after_click()
+                return
             else:
                 plan = plan_template_click(
                     self.nav, screen, template, bounds=bounds
