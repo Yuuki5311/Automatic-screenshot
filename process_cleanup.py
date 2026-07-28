@@ -438,12 +438,12 @@ def _kill_by_name(name: str) -> bool:
     if platform.system() != "Windows":
         return False
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["taskkill", "/F", "/IM", name],
             capture_output=True,
             timeout=10,
         )
-        return True
+        return result.returncode == 0
     except Exception:
         return False
 
@@ -451,20 +451,33 @@ def _kill_by_name(name: str) -> bool:
 def _force_kill(driver_pid: int, info: dict) -> None:
     """对单个 driver 执行三级降级清理。
 
-    Level 1: driver.quit() (优雅退出)
+    Level 1: driver.quit() (优雅退出) → 验证进程是否真正退出
     Level 2: 实时扫描整个进程树 → taskkill /F /PID (精确强杀所有子孙)
     Level 3: taskkill /F /IM msedgedriver.exe + msedge.exe (全局兜底)
     """
     driver = info.get("driver")
 
-    # Level 1: 优雅退出
+    # Level 1: 优雅退出，然后验证进程是否真正终止
     if driver is not None:
         try:
             driver.quit()
-            log.debug("driver.quit() 成功")
-            return  # 成功，无需后续强杀
+            log.debug("driver.quit() 完成，验证进程是否退出...")
         except Exception:
-            log.debug("driver.quit() 失败，进入 Level 2", exc_info=True)
+            log.debug("driver.quit() 异常", exc_info=True)
+
+        # 关键：quit() 返回只说明命令已发送，窗口可能已关，
+        # 但进程可能还活着（卡在 GPU/网络/IO）。验证进程树是否真的死了。
+        time.sleep(1)
+        if driver_pid is not None and driver_pid > 0:
+            survivors = _find_all_descendant_pids(driver_pid)
+            alive = [p for p in survivors if p != driver_pid]
+            if not alive and not _process_exists(driver_pid):
+                log.debug("Level 1 完成，进程已全部退出")
+                return
+            log.warning(
+                f"quit 后仍有 {len(alive)} 个进程存活: {alive}，"
+                f"进入 Level 2"
+            )
 
     # Level 2: 重新扫描整个进程树并强杀
     # （不依赖注册时的快照——Edge 后续会不断创建新渲染进程）
@@ -491,21 +504,25 @@ def _force_kill(driver_pid: int, info: dict) -> None:
     if platform.system() == "Windows":
         log.warning("执行 Level 3 全局兜底（msedgedriver.exe + msedge.exe）")
         _kill_by_name("msedgedriver.exe")
-        # msedge.exe 也做全局清理：此时已确认是残留，且 Level 2 已尽力精确杀
         _kill_by_name("msedge.exe")
 
 
 def cleanup_all() -> None:
-    """清理所有已注册的 driver 及其子进程。
+    """清理所有已注册的 driver 及其子进程，外加兜底孤儿扫描。
 
     幂等：可被多次安全调用（atexit + _on_close + finally 可能叠加）。
     全程 try/except，失败不阻塞退出。
     """
     try:
+        # 1. 清理已注册的 driver
         for driver_pid in list(_drivers.keys()):
             info = _drivers.pop(driver_pid, None)
             if info is None:
                 continue
             _force_kill(driver_pid, info)
+
+        # 2. 兜底：即使 _drivers 已空（如 finally 已 unregister），
+        #    也扫描一次孤儿进程，防止 driver.quit() 窗口关了但进程残留
+        cleanup_orphans()
     except Exception:
         log.error("cleanup_all 异常", exc_info=True)
