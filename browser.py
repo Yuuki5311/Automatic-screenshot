@@ -273,10 +273,19 @@ def create_browser(width: int = None, height: int = None):
     if height is None:
         height = BROWSER_HEIGHT
 
+    import process_cleanup
+
     system = platform.system()
 
     if system == "Windows":
-        return _create_edge(width, height)
+        driver = _create_edge(width, height)
     else:
         # macOS / Linux fallback → Chrome
-        return _create_chrome(width, height)
+        driver = _create_chrome(width, height)
+
+    # 确保 Job Object 已创建（首次调用时创建，后续复用）
+    process_cleanup.create_job_object()
+    # 将 driver 及其子进程加入追踪和 Job Object
+    process_cleanup.register_driver(driver)
+
+    return driver
