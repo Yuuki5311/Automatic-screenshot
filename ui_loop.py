@@ -322,6 +322,9 @@ class Goal:
             parsed = parse_click_item(item)
             if parsed["template"] == "__coords__":
                 return [parsed["anchor"]] if parsed["anchor"] else []
+            if parsed["template"] == "__optional__":
+                # __optional__ 的实际模板存在 desc 字段中
+                return [parsed["desc"]] if parsed["desc"].endswith(".png") else []
             return [parsed["template"]]
         if self.phase_need_back():
             return ["back_arrow.png"]
