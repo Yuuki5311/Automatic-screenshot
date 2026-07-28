@@ -210,14 +210,8 @@ class App(tk.Tk):
         """关闭窗口。"""
         self._stop_event.set()
         if self._worker_thread and self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=3)
-        if self._driver is not None:
-            try:
-                self._driver.quit()
-            except Exception:
-                pass
-            self._driver = None
-        # 兜底：清理所有追踪 driver（含 Job Object 内的残留）
+            self._worker_thread.join(timeout=5)
+        # 统一清理：cleanup_all() 内部做 quit → 验证 → taskkill 三级降级
         import process_cleanup
         process_cleanup.cleanup_all()
         self.destroy()

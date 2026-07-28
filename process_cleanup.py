@@ -320,20 +320,41 @@ def cleanup_orphans() -> None:
                 _kill_pid(pid)
             killed_any = True
 
-        # ---- 第 2 轮：孤儿 msedge.exe（父进程已死） ----
-        all_edge = _all_pids_by_name("msedge.exe")
-        orphan_edge: list[int] = []
-        for pid in all_edge:
-            ppid = _get_parent_pid(pid)
-            if ppid is not None and ppid > 0 and not _process_exists(ppid):
-                # 父进程不存在 → 孤儿
-                orphan_edge.append(pid)
+        # ---- 第 2 轮：孤儿 msedge.exe（递归查祖先，防止漏掉孙进程） ----
+        # Edge 进程树可能有多层，只看直接父进程不够：
+        #   msedge.exe A (父=dead msedgedriver) → 孤儿 ✓
+        #   msedge.exe B (父=A, 仍存活)         → 未标记 ✗ → A 被杀后 B 残留
+        # 解法：向上追溯祖先链，找不到活着的 msedgedriver.exe 就是孤儿。
+        # 杀完一轮后重扫，直到没有新孤儿为止。
+        live_drivers = set(_all_pids_by_name("msedgedriver.exe"))
+        for _round in range(3):  # 最多 3 轮，Edge 进程树通常 ≤4 层
+            all_edge = _all_pids_by_name("msedge.exe")
+            orphan_edge: list[int] = []
+            for pid in all_edge:
+                # 追溯祖先链：向上最多 10 层
+                ancestor = pid
+                is_orphan = True
+                for _depth in range(10):
+                    ppid = _get_parent_pid(ancestor)
+                    if ppid is None or ppid <= 0:
+                        break  # 到达进程树根节点，无更多祖先
+                    if ppid in live_drivers:
+                        is_orphan = False  # 属于活着的 driver → 合法进程
+                        break
+                    if not _process_exists(ppid):
+                        break  # 祖先已死 → 孤儿
+                    ancestor = ppid
+                if is_orphan:
+                    orphan_edge.append(pid)
 
-        if orphan_edge:
-            log.info(f"发现孤儿 msedge.exe (父进程已死): {orphan_edge}")
+            if not orphan_edge:
+                break
+
+            log.info(f"发现孤儿 msedge.exe (第{_round + 1}轮): {orphan_edge}")
             for pid in orphan_edge:
                 _kill_pid(pid)
             killed_any = True
+            time.sleep(0.5)  # 等进程退出后再重扫
 
         if not killed_any:
             log.debug("启动扫描：未发现孤儿进程")
@@ -448,6 +469,41 @@ def _kill_by_name(name: str) -> bool:
         return False
 
 
+def _quit_with_timeout(driver, timeout_s: float = 5.0) -> bool:
+    """带超时的 driver.quit()。
+
+    Selenium driver.quit() 发送 HTTP DELETE /session。如果 msedgedriver
+    进程已挂起，请求可能阻塞 120s（Selenium 默认超时），导致整个清理流程卡死。
+    用线程包装，超时后直接放弃 Level 1，进入 Level 2 强杀。
+
+    Returns:
+        True: quit 成功完成
+        False: 超时或异常
+    """
+    import threading
+
+    result: dict = {"done": False, "error": None}
+
+    def _do_quit():
+        try:
+            driver.quit()
+            result["done"] = True
+        except Exception as e:
+            result["error"] = e
+
+    t = threading.Thread(target=_do_quit, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+
+    if t.is_alive():
+        log.warning(f"driver.quit() 超时 ({timeout_s}s)，放弃优雅退出，进入强杀")
+        return False
+    if result["error"] is not None:
+        log.debug(f"driver.quit() 异常: {result['error']}")
+        return False
+    return result["done"]
+
+
 def _force_kill(driver_pid: int, info: dict) -> None:
     """对单个 driver 执行三级降级清理。
 
@@ -459,11 +515,7 @@ def _force_kill(driver_pid: int, info: dict) -> None:
 
     # Level 1: 优雅退出，然后验证进程是否真正终止
     if driver is not None:
-        try:
-            driver.quit()
-            log.debug("driver.quit() 完成，验证进程是否退出...")
-        except Exception:
-            log.debug("driver.quit() 异常", exc_info=True)
+        _quit_with_timeout(driver, timeout_s=5.0)
 
         # 关键：quit() 返回只说明命令已发送，窗口可能已关，
         # 但进程可能还活着（卡在 GPU/网络/IO）。验证进程树是否真的死了。
