@@ -20,6 +20,18 @@ from logger import get_logger
 log = get_logger()
 
 # ---------------------------------------------------------------------------
+# 工具
+# ---------------------------------------------------------------------------
+
+
+def _run_hidden(args, **kwargs):
+    """subprocess.run 包装：添加 CREATE_NO_WINDOW 防止弹窗闪烁。"""
+    if platform.system() == "Windows":
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return subprocess.run(args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
 # 状态
 # ---------------------------------------------------------------------------
 
@@ -165,7 +177,7 @@ def _find_direct_children(parent_pid: int) -> list[int]:
     if platform.system() != "Windows":
         return []
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             [
                 "wmic", "process", "where",
                 f"ParentProcessId={parent_pid}",
@@ -387,7 +399,7 @@ def _all_pids_by_name(name: str) -> list[int]:
     if platform.system() != "Windows":
         return []
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["wmic", "process", "where", f"name='{name}'", "get", "ProcessId"],
             capture_output=True, text=True, timeout=10,
         )
@@ -406,7 +418,7 @@ def _get_parent_pid(pid: int) -> int | None:
     if platform.system() != "Windows":
         return None
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["wmic", "process", "where", f"ProcessId={pid}",
              "get", "ParentProcessId"],
             capture_output=True, text=True, timeout=10,
@@ -437,7 +449,7 @@ def _kill_pid(pid: int) -> bool:
             return False
 
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["taskkill", "/F", "/PID", str(pid)],
             capture_output=True,
             timeout=10,
@@ -459,7 +471,7 @@ def _kill_by_name(name: str) -> bool:
     if platform.system() != "Windows":
         return False
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["taskkill", "/F", "/IM", name],
             capture_output=True,
             timeout=10,
