@@ -753,6 +753,7 @@ class App(tk.Tk):
                 on_progress=_on_progress,
                 recover=_do_recover,
                 relogin=lambda: game_login(nav, platform, on_game_qr, on_game_status),
+                avatar_coords=_avatar_xy,
             ).run()
 
             if self._stop_event.is_set():

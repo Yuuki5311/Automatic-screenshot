@@ -448,6 +448,7 @@ class UiLoop:
         relogin: Callable[[], bool] | None = None,
         tick_s: float = 0.5,
         classify_fn=None,
+        avatar_coords: tuple | None = None,
     ):
         self.nav = nav
         self.shot = shot
@@ -460,6 +461,7 @@ class UiLoop:
         self.tick_s = tick_s
         self.classify_fn = classify_fn or classify
         self._total = len(tasks)
+        self._avatar_coords = avatar_coords
 
     def _stopped(self) -> bool:
         return bool(self.stop_event is not None and self.stop_event.is_set())
@@ -653,6 +655,43 @@ class UiLoop:
                 "warn",
             )
             self._close_popup()
+
+        # 重试耗尽 → 点头像坐标关弹窗，再试 2 次
+        if self._avatar_coords and verify_tpl is not None:
+            self._log("  重试耗尽，点击头像坐标消除弹窗...", "warn")
+            from click_confirm import plan_coords_click, execute_click_with_confirm
+            screen = self.nav._get_screenshot()
+            plan = plan_coords_click(screen, *self._avatar_coords)
+            execute_click_with_confirm(self.nav, plan)
+            time.sleep(CLICK_INTERVAL)
+            self._close_popup()
+
+            for attempt in range(1, 3):
+                if self._stopped():
+                    return
+                screen = self.nav._get_screenshot()
+                if template == "__coords__":
+                    x, y = bounds
+                    plan = plan_coords_click(screen, x, y)
+                    clicked = execute_click_with_confirm(self.nav, plan)
+                else:
+                    plan = plan_template_click(
+                        self.nav, screen, template, bounds=bounds
+                    )
+                    if plan is None:
+                        self._log(f"  恢复后仍找不到 {template}", "warn")
+                        return
+                    clicked = execute_click_with_confirm(self.nav, plan)
+
+                if not clicked:
+                    return
+
+                if self.nav.wait_for_template(verify_tpl, timeout=EFFECT_VERIFY_TIMEOUT):
+                    self._log(f"  恢复后点击生效 ({attempt}/2)", "success")
+                    self.goal.advance_after_click()
+                    return
+
+                self._close_popup()
 
         self._log(f"  点击未生效: {desc}", "warn")
 
