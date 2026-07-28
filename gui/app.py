@@ -217,6 +217,9 @@ class App(tk.Tk):
             except Exception:
                 pass
             self._driver = None
+        # 兜底：清理所有追踪 driver（含 Job Object 内的残留）
+        import process_cleanup
+        process_cleanup.cleanup_all()
         self.destroy()
 
     def _on_manual_login_done(self):
@@ -816,6 +819,9 @@ class App(tk.Tk):
                     driver.quit()
                 except Exception:
                     pass
+                # quit 后移出追踪（无论成功失败都移出，失败由 cleanup_all 兜底）
+                import process_cleanup
+                process_cleanup.unregister_driver(driver)
                 driver = None
             self._driver = None
 
