@@ -38,7 +38,17 @@ def _preload_runtime():
 
 
 if __name__ == "__main__":
+    import atexit
+    import process_cleanup
+
     multiprocessing.freeze_support()
+
+    # 最早阶段：清扫上一次运行可能残留的 msedgedriver.exe
+    process_cleanup.cleanup_orphans()
+
+    # 正常退出兜底（覆盖 mainloop 结束、未捕获异常、sys.exit）
+    atexit.register(process_cleanup.cleanup_all)
+
     try:
         _preload_runtime()
     except Exception:
