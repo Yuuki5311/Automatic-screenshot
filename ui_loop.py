@@ -57,8 +57,8 @@ def login_platform_page_visible(
     return False
 
 
-def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None) -> str | None:
-    """关闭 X 或确认「确定」；返回点中的模板名，未点到返回 None。"""
+def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None, avatar_coords: tuple | None = None) -> str | None:
+    """关闭 X 或确认「确定」；都未点到则点头像坐标兜底；返回点中的模板名。"""
     from login import bottom_half_bounds
 
     def _emit(text: str, level: str = "info") -> None:
@@ -95,6 +95,14 @@ def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None
             _emit(f"已点击确认弹窗 ({tpl})", "success")
             time.sleep(CLICK_INTERVAL)
             return tpl
+
+    # 兜底：点头像坐标关闭弹窗
+    if avatar_coords is not None:
+        _emit("未点到关闭/确认按钮，点击头像坐标关闭弹窗", "warn")
+        nav.click_css(*avatar_coords)
+        time.sleep(CLICK_INTERVAL)
+        return "__avatar_fallback__"
+
     _emit("判为弹窗但未点到关闭/确认按钮", "warn")
     return None
 
@@ -537,7 +545,7 @@ class UiLoop:
         return self.goal.success
 
     def _close_popup(self) -> None:
-        hit = close_perception_popup(self.nav, on_log=self.on_log)
+        hit = close_perception_popup(self.nav, on_log=self.on_log, avatar_coords=self._avatar_coords)
         if hit is None:
             pass
 
