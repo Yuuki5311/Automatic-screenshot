@@ -38,10 +38,13 @@ def effect_verify_template(next_item: tuple | None) -> str | None:
     - 无下一步（本任务最后一击）→ None（不强制验证）
     - 下一步是普通模板 → 等该模板出现
     - 下一步是坐标点击 → 用其 anchor（若有）
+    - 下一步是可选弹窗 → 用其实际模板名（desc 字段）
     """
     if next_item is None:
         return None
     parsed = parse_click_item(next_item)
     if parsed["template"] == "__coords__":
         return parsed["anchor"]
+    if parsed["template"] == "__optional__":
+        return parsed["desc"]
     return parsed["template"]
