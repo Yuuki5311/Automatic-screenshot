@@ -640,7 +640,7 @@ class UiLoop:
                 # 可选弹窗：尝试匹配，有则点头像关闭，无则跳过
                 popup_tpl = desc
                 dismiss_xy = bounds
-                plan = plan_template_click(self.nav, screen, popup_tpl)
+                plan = plan_template_click(self.nav, screen, popup_tpl, threshold=0.8)
                 if plan is not None:
                     self._log(
                         f"  检测到 {popup_tpl} (置信度 {plan.score:.2f})，"
