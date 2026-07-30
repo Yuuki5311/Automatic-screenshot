@@ -310,7 +310,7 @@ class App(tk.Tk):
             from navigator import Navigator
             from screenshotter import Screenshotter
             from popup_monitor import PopupMonitor
-            from ui_loop import UiLoop, run_pre_logout_loop
+            from ui_loop import UiLoop, run_pre_logout_loop, close_perception_popup
             _log.info("工作流模块就绪")
 
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -436,67 +436,84 @@ class App(tk.Tk):
 
                 self._send({"type": "log", "text": "✅ 已切换到云游戏标签页", "level": "success"})
 
-                # ---- 粗清初始弹窗 → enter_game 快速通道 → 预退出感知环 ----
-                self._send({"type": "log", "text": "等待 10 秒后清除初始弹窗..."})
+                # ---- 感知环：先清弹窗 → 检测 enter_game / 退出重登 ----
+                self._send({"type": "log", "text": "等待 10 秒后启动感知环..."})
                 time.sleep(10)
                 _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
-                vw, vh = _nav.viewport_size()
-                _nav.click_css(vw // 2, int(vh * 0.85))
-                self._send({"type": "log", "text": "已尝试清除弹窗"})
 
-                # 优先检查 enter_game：已登录的游戏会话直接进入即可，无需退出重登
                 _entered_via_fast_path = False
-                if _nav.wait_for_template("enter_game.png", timeout=5):
-                    self._send({
-                        "type": "log",
-                        "text": "检测到进入游戏按钮，跳过预退出环，点击进入...",
-                        "level": "success",
-                    })
-                    _nav.find_and_click("enter_game.png", timeout=5)
-                    self._send({
-                        "type": "log",
-                        "text": "✅ 已点击进入游戏",
-                        "level": "success",
-                    })
-                    time.sleep(3)
-                    _nav.cleanup()
-                    _entered_via_fast_path = True
+                STAGE2_TIMEOUT = 60
+                STAGE2_TICK = 2.0
+                deadline = time.time() + STAGE2_TIMEOUT
+
+                # ==== Phase 1: 彻底清弹窗 ====
+                self._send({"type": "log", "text": "感知环 Phase 1: 清理弹窗..."})
+                _popup_clean_rounds = 0
+                while time.time() < deadline:
+                    if self._stop_event.is_set():
+                        return
+                    hit = close_perception_popup(_nav, on_log=lambda text, level="info":
+                        self._send({"type": "log", "text": text, "level": level}))
+                    if hit:
+                        _popup_clean_rounds = 0
+                        time.sleep(STAGE2_TICK)
+                        continue
+                    _popup_clean_rounds += 1
+                    if _popup_clean_rounds >= 3:
+                        self._send({"type": "log", "text": "弹窗清理完毕", "level": "success"})
+                        break
+                    time.sleep(STAGE2_TICK)
+
+                # ==== Phase 2: 检测 enter_game / 退出登录 / 返回箭头 ====
+                self._send({"type": "log", "text": "感知环 Phase 2: 检测进入游戏..."})
+                while time.time() < deadline:
+                    if self._stop_event.is_set():
+                        return
+
+                    # ① 弹窗优先
+                    hit = close_perception_popup(_nav, on_log=lambda text, level="info":
+                        self._send({"type": "log", "text": text, "level": level}))
+                    if hit:
+                        time.sleep(STAGE2_TICK)
+                        continue
+
+                    # ② 检测 enter_game → 快速通道
+                    if _nav.wait_for_template("enter_game.png", timeout=1):
+                        self._send({"type": "log", "text": "检测到进入游戏按钮，快速通道", "level": "success"})
+                        _nav.find_and_click("enter_game.png", timeout=5)
+                        time.sleep(3)
+                        _entered_via_fast_path = True
+                        break
+
+                    # ③ 已在主界面 → 快速通道
+                    if _nav.wait_for_template("game_main.png", timeout=1):
+                        self._send({"type": "log", "text": "已在游戏主界面，快速通道", "level": "success"})
+                        _entered_via_fast_path = True
+                        break
+
+                    # ④ 检测退出按钮 → 点击退出
+                    if _nav.find_and_click("game_logout_btn.png", timeout=2, max_retries=1, threshold=0.75):
+                        self._send({"type": "log", "text": "点击退出登录...", "level": "info"})
+                        time.sleep(2)
+                        # 处理退出确认弹窗
+                        close_perception_popup(_nav, on_log=lambda text, level="info":
+                            self._send({"type": "log", "text": text, "level": level}))
+                        continue
+
+                    # ⑤ 清返回箭头
+                    if _nav.find_and_click("back_arrow.png", timeout=2, max_retries=1, threshold=0.75):
+                        self._send({"type": "log", "text": "点击返回箭头..."})
+                        time.sleep(1)
+                        continue
+
+                    time.sleep(STAGE2_TICK)
+
+                _nav.cleanup()
+
+                if _entered_via_fast_path:
+                    self._send({"type": "log", "text": "✅ 快速通道，跳过游戏登录", "level": "success"})
                 else:
-                    self._send({"type": "log", "text": "未检测到进入游戏按钮，启动预退出感知环..."})
-                    pre = run_pre_logout_loop(
-                        _nav,
-                        stop_event=self._stop_event,
-                        timeout_s=30.0,
-                        tick_s=2.0,
-                        on_log=lambda text, level="info": self._send(
-                            {"type": "log", "text": text, "level": level}
-                        ),
-                    )
-                    _nav.cleanup()
-                    if pre.logout_clicked:
-                        self._send({
-                            "type": "log",
-                            "text": (
-                                f"预退出完成（确认: {pre.confirm_clicked}）"
-                                if pre.confirm_clicked
-                                else "预退出完成（未检测到确认弹窗）"
-                            ),
-                            "level": "success",
-                        })
-                    elif pre.timed_out:
-                        self._send({
-                            "type": "log",
-                            "text": "未检测到退出按钮（已超时），关闭预退出环，继续选择平台",
-                            "level": "warn",
-                        })
-                    else:
-                        self._send({
-                            "type": "log",
-                            "text": "未检测到退出按钮（已在平台页），关闭预退出环，继续选择平台",
-                            "level": "info",
-                        })
-                    self._send({"type": "log", "text": "预退出感知环已关闭，开始选择登录平台"})
-                monitor = None
+                    self._send({"type": "log", "text": "感知环结束，进入平台选择", "level": "info"})
 
             # ====== 阶段 3: 游戏内登录 + 截图 ======
             if self._stop_event.is_set():
@@ -585,33 +602,69 @@ class App(tk.Tk):
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功（已点进入游戏）", "level": "success"})
 
-            # ---- 进入游戏后先等 10 秒，再清返回箭头 + 弹窗，然后验证是否进入主界面 ----
-            self._send({"type": "log", "text": "等待 10 秒后处理弹窗..."})
-            time.sleep(10)
+            # ---- 感知环：先彻底清弹窗 → 检测 enter_game → 验证主界面 ----
+            self._send({"type": "log", "text": "启动登录后感知环..."})
+            POST_LOGIN_TIMEOUT = 60
+            POST_LOGIN_TICK = 2.0
+            deadline = time.time() + POST_LOGIN_TIMEOUT
 
-            # 先处理返回箭头：点进入游戏后可能停在子页面
-            ARROW_TIMEOUT = 5
-            ARROW_THRESHOLD = 0.75
-            while True:
-                if nav.find_and_click("back_arrow.png", timeout=ARROW_TIMEOUT, max_retries=1, threshold=ARROW_THRESHOLD):
-                    self._send({"type": "log", "text": "已点击返回箭头，继续检查..."})
+            # ==== Phase 1: 彻底清弹窗（确认干净后才进入下一阶段） ====
+            self._send({"type": "log", "text": "感知环 Phase 1: 清理弹窗..."})
+            _popup_clean_rounds = 0
+            while time.time() < deadline:
+                if self._stop_event.is_set():
+                    return
+
+                hit = close_perception_popup(nav, on_log=lambda text, level="info":
+                    self._send({"type": "log", "text": text, "level": level}))
+                if hit:
+                    _popup_clean_rounds = 0  # 有关闭动作，重置计数
+                    time.sleep(POST_LOGIN_TICK)
+                    continue
+
+                _popup_clean_rounds += 1
+                if _popup_clean_rounds >= 3:
+                    self._send({"type": "log", "text": "弹窗清理完毕", "level": "success"})
+                    break
+                time.sleep(POST_LOGIN_TICK)
+
+            # ==== Phase 2: 检测 enter_game → 验证主界面 → 清返回箭头 ====
+            self._send({"type": "log", "text": "感知环 Phase 2: 检测进入游戏..."})
+            while time.time() < deadline:
+                if self._stop_event.is_set():
+                    return
+
+                # ① 仍有弹窗则优先关闭
+                hit = close_perception_popup(nav, on_log=lambda text, level="info":
+                    self._send({"type": "log", "text": text, "level": level}))
+                if hit:
+                    time.sleep(POST_LOGIN_TICK)
+                    continue
+
+                # ② 检测 enter_game.png（可能重连/重启后再次出现）
+                if nav.wait_for_template("enter_game.png", timeout=1):
+                    self._send({"type": "log", "text": "检测到进入游戏按钮，点击...", "level": "info"})
+                    nav.find_and_click("enter_game.png", timeout=5)
+                    time.sleep(3)
+                    continue
+
+                # ③ 验证主界面
+                if nav.wait_for_template("game_main.png", timeout=1):
+                    self._send({"type": "log", "text": "✅ 已进入游戏主界面", "level": "success"})
+                    break
+
+                # ④ 清返回箭头（可能在子页面）
+                if nav.find_and_click("back_arrow.png", timeout=2, max_retries=1, threshold=0.75):
+                    self._send({"type": "log", "text": "点击返回箭头..."})
                     time.sleep(1)
                     continue
-                break
-            self._send({"type": "log", "text": "返回箭头检查完毕"})
 
-            # 再清弹窗
-            self._send({"type": "log", "text": "进入游戏后清理弹窗..."})
-            monitor = PopupMonitor(navigator=nav)
-            monitor.close_all_popups()
-            time.sleep(3)
-            monitor.close_all_popups()
-            monitor.wait_until_clear(3)
-            self._send({"type": "log", "text": "弹窗清理完毕，验证游戏主界面..."})
+                time.sleep(POST_LOGIN_TICK)
 
-            if not nav.wait_for_template("game_main.png", timeout=15):
-                _log.error("[阶段3] 游戏登录验证失败：未检测到游戏主界面")
-                self._send({"type": "log", "text": "❌ 未进入游戏主界面，登录可能失败", "level": "error"})
+            else:
+                # 超时未检测到主界面
+                _log.error("[阶段3] 游戏登录验证失败：超时未检测到游戏主界面")
+                self._send({"type": "log", "text": "❌ 未进入游戏主界面（超时60s）", "level": "error"})
                 self._send({"type": "done", "text": "❌ 未进入游戏主界面"})
                 return
 
@@ -648,8 +701,8 @@ class App(tk.Tk):
                 ], 0),
                 ("万象图鉴首页", [
                     ("tab_illustrated.png", "点击图鉴标签"),
-                    ("universal_illustrated.png", "点击万象图鉴"),
                     ("__optional__", "congrats_popup.png", _avatar_xy, "恭贺弹窗"),
+                    ("universal_illustrated.png", "点击万象图鉴"),
                 ], 0),
                 ("万象图鉴-灵宝", [
                     ("lingbao.png", "点击灵宝"),

@@ -451,6 +451,8 @@ class TestGameLoginPlatformFallback:
         )
         nav = Mock()
         nav.viewport_size.return_value = (1920, 1080)
+        nav._get_screenshot.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        nav._load_template.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
         platform_hits = {"n": 0}
 
         def find_and_click(tpl, **kwargs):
@@ -518,9 +520,9 @@ class TestGameLoginAuthFlow:
         statuses = []
 
         assert game_login(nav, "qq_ios", on_status=statuses.append) is True
-        # enter_game 直接返回，不调清弹窗
+        # enter_game 仅检测不点击，交给感知环处理
         mock_close.assert_not_called()
-        assert any("直接进入" in s for s in statuses)
+        assert any("感知环" in s for s in statuses)
 
     @patch("login.time.sleep", return_value=None)
     @patch("ui_loop.close_perception_popup")
@@ -1361,7 +1363,8 @@ class TestUiLoopRun:
         nav.viewport_size.return_value = (1920, 1080)
         nav.find_and_click.return_value = True
         nav.wait_for_template.return_value = True
-        nav._get_screenshot.return_value = np.zeros((100, 100, 3), dtype=np.uint8)
+        nav._get_screenshot.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        nav._load_template.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
         shot = Mock()
         shot.take.return_value = "x.png"
 

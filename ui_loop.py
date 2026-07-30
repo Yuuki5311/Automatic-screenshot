@@ -58,8 +58,12 @@ def login_platform_page_visible(
 
 
 def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None, avatar_coords: tuple | None = None) -> str | None:
-    """关闭 X 或确认「确定」；都未点到则点头像坐标兜底；返回点中的模板名。"""
+    """检测并关闭弹窗；返回点中的模板名，无弹窗返回 None。
+
+    先用 match_score 快速检测（单帧），确认存在后再用 find_and_click 点击。
+    """
     from login import bottom_half_bounds
+    from ui_state import match_score
 
     def _emit(text: str, level: str = "info") -> None:
         if on_log:
@@ -69,32 +73,39 @@ def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None
         else:
             log.info(text)
 
-    vw, vh = nav.viewport_size()
-    bounds = popup_close_bounds(vw, vh)
-    for tpl in POPUP_CLOSE_TEMPLATES:
-        if nav.find_and_click(
-            tpl,
-            timeout=2,
-            bounds=bounds,
-            threshold=POPUP_CLOSE_THRESHOLD,
-            allow_fallback=False,
-        ):
-            _emit(f"已关闭弹窗 ({tpl})", "success")
-            time.sleep(CLICK_INTERVAL)
-            return tpl
+    # 一帧检测所有弹窗类型
+    screen = nav._get_screenshot()
+    vh, vw = screen.shape[:2]
+    close_bounds = popup_close_bounds(vw, vh)
+    confirm_bounds_val = bottom_half_bounds(vw, vh)
 
-    confirm_bounds = bottom_half_bounds(vw, vh)
+    # 快速检测弹窗 X 按钮 → 确认存在后才用 find_and_click
+    for tpl in POPUP_CLOSE_TEMPLATES:
+        if match_score(nav, tpl, bounds=close_bounds, screen=screen) >= POPUP_CLOSE_THRESHOLD:
+            if nav.find_and_click(
+                tpl,
+                timeout=2,
+                bounds=close_bounds,
+                threshold=POPUP_CLOSE_THRESHOLD,
+                allow_fallback=False,
+            ):
+                _emit(f"已关闭弹窗 ({tpl})", "success")
+                time.sleep(CLICK_INTERVAL)
+                return tpl
+
+    # 快速检测确认弹窗 → 确认存在后才点击
     for tpl in POPUP_CONFIRM_TEMPLATES:
-        if nav.find_and_click(
-            tpl,
-            timeout=2,
-            bounds=confirm_bounds,
-            threshold=CONFIRM_THRESHOLD,
-            allow_fallback=False,
-        ):
-            _emit(f"已点击确认弹窗 ({tpl})", "success")
-            time.sleep(CLICK_INTERVAL)
-            return tpl
+        if match_score(nav, tpl, bounds=confirm_bounds_val, screen=screen) >= CONFIRM_THRESHOLD:
+            if nav.find_and_click(
+                tpl,
+                timeout=2,
+                bounds=confirm_bounds_val,
+                threshold=CONFIRM_THRESHOLD,
+                allow_fallback=False,
+            ):
+                _emit(f"已点击确认弹窗 ({tpl})", "success")
+                time.sleep(CLICK_INTERVAL)
+                return tpl
 
     # 兜底：点头像坐标关闭弹窗
     if avatar_coords is not None:
@@ -103,7 +114,7 @@ def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None
         time.sleep(CLICK_INTERVAL)
         return "__avatar_fallback__"
 
-    _emit("判为弹窗但未点到关闭/确认按钮", "warn")
+    # 无弹窗，静默返回
     return None
 
 
@@ -640,7 +651,7 @@ class UiLoop:
                 # 可选弹窗：尝试匹配，有则点头像关闭，无则跳过
                 popup_tpl = desc
                 dismiss_xy = bounds
-                plan = plan_template_click(self.nav, screen, popup_tpl, threshold=0.8)
+                plan = plan_template_click(self.nav, screen, popup_tpl, threshold=0.75)
                 if plan is not None:
                     self._log(
                         f"  检测到 {popup_tpl} (置信度 {plan.score:.2f})，"
