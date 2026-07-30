@@ -772,7 +772,7 @@ class App(tk.Tk):
                 ("小兵", [
                     ("customize_icon.png", "点击定制"),
                     ("skin_customize.png", "点击皮肤定制"),
-                    ("__coords__", "点击小兵", _minion_xy, "back_arrow.png"),
+                    ("__coords__", "点击小兵", _minion_xy, "back_arrow.png", 120),
                 ], 1),
                 ("个性戳戳", [
                     ("customize_icon.png", "点击定制"),

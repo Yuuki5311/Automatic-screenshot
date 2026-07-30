@@ -7,6 +7,15 @@ from typing import Any
 
 def parse_click_item(item: tuple) -> dict[str, Any]:
     """解析 screenshot_tasks 中的一步点击配置。"""
+    if len(item) == 5:
+        template, desc, coords, anchor, verify_timeout = item
+        return {
+            "template": template,
+            "desc": desc,
+            "bounds": coords,
+            "anchor": anchor,
+            "verify_timeout": verify_timeout,
+        }
     if len(item) == 4:
         template, desc, coords, anchor = item
         return {
@@ -14,6 +23,7 @@ def parse_click_item(item: tuple) -> dict[str, Any]:
             "desc": desc,
             "bounds": coords,
             "anchor": anchor,
+            "verify_timeout": None,
         }
     if len(item) == 3:
         template, desc, bounds = item
@@ -22,6 +32,7 @@ def parse_click_item(item: tuple) -> dict[str, Any]:
             "desc": desc,
             "bounds": bounds,
             "anchor": None,
+            "verify_timeout": None,
         }
     template, desc = item
     return {
@@ -29,6 +40,7 @@ def parse_click_item(item: tuple) -> dict[str, Any]:
         "desc": desc,
         "bounds": None,
         "anchor": None,
+        "verify_timeout": None,
     }
 
 

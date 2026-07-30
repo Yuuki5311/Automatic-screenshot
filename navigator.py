@@ -257,7 +257,8 @@ class Navigator:
         return False
 
     def wait_for_template(self, template_name: str, timeout: int = 15,
-                          threshold: float = None, bounds: tuple = None) -> bool:
+                          threshold: float = None, bounds: tuple = None,
+                          interval: int = 1) -> bool:
         """轮询等待模板出现（不点击）。
 
         Args:
@@ -265,6 +266,7 @@ class Navigator:
             timeout: 最大等待时间（秒）。
             threshold: 匹配置信度阈值，默认使用 self.threshold。
             bounds: 可选 (x, y, w, h) 限制搜索区域（CSS 像素）。
+            interval: 轮询间隔（秒），默认 1。
 
         Returns:
             bool: 在超时前检测到模板返回 True，否则 False。
@@ -293,7 +295,7 @@ class Navigator:
             if max_val >= _threshold:
                 log.info(f"检测到 {template_name} (置信度 {max_val:.2f})")
                 return True
-            time.sleep(1)
+            time.sleep(interval)
 
         if best_val >= 0:
             log.warning(

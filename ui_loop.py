@@ -630,6 +630,9 @@ class UiLoop:
             else None
         )
         verify_tpl = effect_verify_template(next_item)
+        # __coords__ 最后一步：用当前项的 anchor 作为验证模板
+        if verify_tpl is None and template == "__coords__":
+            verify_tpl = parsed.get("anchor")
 
         from click_confirm import (
             execute_click_with_confirm,
@@ -681,6 +684,16 @@ class UiLoop:
                 return
 
             if verify_tpl is None:
+                self.goal.advance_after_click()
+                return
+
+            # 自定义验证超时：单次长轮询，不重试
+            custom_timeout = parsed.get("verify_timeout")
+            if custom_timeout is not None:
+                if self.nav.wait_for_template(verify_tpl, timeout=custom_timeout, interval=3):
+                    self._log(f"  检测到 {verify_tpl}，继续")
+                else:
+                    self._log(f"  超时未检测到 {verify_tpl}（{custom_timeout}s），跳过", "warn")
                 self.goal.advance_after_click()
                 return
 
