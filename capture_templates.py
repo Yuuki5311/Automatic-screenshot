@@ -47,6 +47,7 @@ TEMPLATES = [
     # ---- 弹窗 ----
     ("popup_close.png", "弹窗 X 关闭按钮", "弹窗右上角"),
     ("popup_close_small.png", "小弹窗 X 关闭按钮", "小弹窗右上角"),
+    ("after_play_popup.png", "进入游戏后弹窗", "游戏主界面前"),
     # ---- 主界面 ----
     ("avatar.png", "左上角头像", "主界面左上角"),
     ("shop_icon.png", "商城入口", "主界面右侧"),

@@ -310,7 +310,7 @@ class App(tk.Tk):
             from navigator import Navigator
             from screenshotter import Screenshotter
             from popup_monitor import PopupMonitor
-            from ui_loop import UiLoop, run_pre_logout_loop, close_perception_popup
+            from ui_loop import UiLoop, run_pre_logout_loop, close_perception_popup, login_platform_page_visible
             _log.info("工作流模块就绪")
 
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -466,6 +466,7 @@ class App(tk.Tk):
 
                 # ==== Phase 2: 检测 enter_game / 退出登录 / 返回箭头 ====
                 self._send({"type": "log", "text": "感知环 Phase 2: 检测进入游戏..."})
+                _nothing_ticks = 0
                 while time.time() < deadline:
                     if self._stop_event.is_set():
                         return
@@ -474,6 +475,7 @@ class App(tk.Tk):
                     hit = close_perception_popup(_nav, on_log=lambda text, level="info":
                         self._send({"type": "log", "text": text, "level": level}))
                     if hit:
+                        _nothing_ticks = 0
                         time.sleep(STAGE2_TICK)
                         continue
 
@@ -494,8 +496,8 @@ class App(tk.Tk):
                     # ④ 检测退出按钮 → 点击退出
                     if _nav.find_and_click("game_logout_btn.png", timeout=2, max_retries=1, threshold=0.75):
                         self._send({"type": "log", "text": "点击退出登录...", "level": "info"})
+                        _nothing_ticks = 0
                         time.sleep(2)
-                        # 处理退出确认弹窗
                         close_perception_popup(_nav, on_log=lambda text, level="info":
                             self._send({"type": "log", "text": text, "level": level}))
                         continue
@@ -503,8 +505,20 @@ class App(tk.Tk):
                     # ⑤ 清返回箭头
                     if _nav.find_and_click("back_arrow.png", timeout=2, max_retries=1, threshold=0.75):
                         self._send({"type": "log", "text": "点击返回箭头..."})
+                        _nothing_ticks = 0
                         time.sleep(1)
                         continue
+
+                    # ⑥ 已在平台选择页 → 退出感知环，交给 game_login
+                    if login_platform_page_visible(_nav):
+                        self._send({"type": "log", "text": "检测到平台选择页，退出感知环，进入游戏登录", "level": "info"})
+                        break
+
+                    # 连续无匹配 → 提前退出（避免空转截屏压垮云游戏 tab）
+                    _nothing_ticks += 1
+                    if _nothing_ticks >= 8:
+                        self._send({"type": "log", "text": "连续无匹配，退出感知环，进入游戏登录", "level": "warn"})
+                        break
 
                     time.sleep(STAGE2_TICK)
 
@@ -601,6 +615,13 @@ class App(tk.Tk):
             _log.info("[阶段3] 游戏登录成功")
             self._send({"type": "page", "name": "progress"})
             self._send({"type": "log", "text": "✅ 游戏登录成功（已点进入游戏）", "level": "success"})
+
+            # ---- 检测 after_play_popup ----
+            if nav.find_and_click("after_play_popup.png", timeout=5, max_retries=2, threshold=0.6):
+                self._send({"type": "log", "text": "已关闭 after_play_popup", "level": "success"})
+                time.sleep(2)
+            else:
+                self._send({"type": "log", "text": "未检测到 after_play_popup，跳过"})
 
             # ---- 感知环：先彻底清弹窗 → 检测 enter_game → 验证主界面 ----
             self._send({"type": "log", "text": "启动登录后感知环..."})
