@@ -585,43 +585,16 @@ def game_login(
         close_perception_popup(nav)
         time.sleep(1)
 
-    # ---- 3. 点击平台登录按钮 ----
-    on_status(f"选择登录平台: {platform_name}...")
+    # ---- 3. 点击授权登录按钮 1 ----
     time.sleep(2)
-
-    if not nav.find_and_click(template_file, timeout=10, bounds=platform_bounds, max_retries=5):
-        on_status(f"找不到 {platform_name} 登录按钮 ({template_file})")
-        if nav.wait_for_template("game_logout_btn.png", timeout=3):
-            on_status("检测到退出按钮，回退到退出登录步骤...")
-            from ui_loop import run_pre_logout_loop
-
-            pre = run_pre_logout_loop(nav, on_log=lambda text, level="info": on_status(text))
-            if pre.logout_clicked:
-                on_status("已回退退出，重新选择登录平台...")
-            elif pre.timed_out:
-                on_status("回退退出超时，仍尝试选择平台...")
-            time.sleep(2)
-            vw, vh = nav.viewport_size()
-            platform_bounds = platform_select_bounds(vw, vh, platform)
-            if not nav.find_and_click(
-                template_file, timeout=10, bounds=platform_bounds, max_retries=5
-            ):
-                on_status(f"回退后仍找不到 {platform_name} 登录按钮")
-                return False
-        else:
-            return False
-
-    on_status(f"已选择 {platform_name} 登录")
-
-    # ---- 4. 点击授权登录按钮 1 ----
-    time.sleep(2)
+    vw, vh = nav.viewport_size()
     auth_bounds = bottom_half_bounds(vw, vh)
     if not nav.find_and_click("game_auth_login_1.png", timeout=10, bounds=auth_bounds, max_retries=3):
         on_status("⚠️ 找不到授权登录按钮 1，将重试")
         return False
     on_status("已点击授权登录 1")
 
-    # ---- 5. 点击授权登录按钮 2 ----
+    # ---- 4. 点击授权登录按钮 2 ----
     time.sleep(2)
     vw, vh = nav.viewport_size()
     auth_bounds = bottom_half_bounds(vw, vh)
@@ -630,7 +603,7 @@ def game_login(
         return False
     on_status("已点击授权登录 2")
 
-    # ---- 6. 点击进入游戏 ----
+    # ---- 5. 点击进入游戏 ----
     time.sleep(2)
     if nav.find_and_click("enter_game.png", timeout=10):
         on_status("✅ 已点击进入游戏")

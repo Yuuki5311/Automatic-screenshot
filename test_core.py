@@ -485,7 +485,7 @@ class TestGameLoginPlatformFallback:
 
         assert game_login(nav, "qq_ios", on_status=statuses.append) is True
         mock_pre.assert_called_once()
-        assert platform_hits["n"] == 3  # step1失败 + retry成功 + step3再点
+        assert platform_hits["n"] == 2  # step1失败 + retry成功
         assert any("退出" in s for s in statuses)
 
     @patch("login.time.sleep", return_value=None)
