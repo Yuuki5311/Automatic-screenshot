@@ -311,6 +311,7 @@ class App(tk.Tk):
             from screenshotter import Screenshotter
             from popup_monitor import PopupMonitor
             from ui_loop import UiLoop, run_pre_logout_loop, close_perception_popup, login_platform_page_visible
+            from keybind_config import configure_keybinding
             _log.info("工作流模块就绪")
 
             # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
@@ -622,6 +623,15 @@ class App(tk.Tk):
                 time.sleep(2)
             else:
                 self._send({"type": "log", "text": "未检测到 after_play_popup，跳过"})
+
+            # ---- 键位配置 ----
+            self._send({"type": "log", "text": "开始键位配置..."})
+            if not configure_keybinding(nav, on_log=lambda text, level="info":
+                    self._send({"type": "log", "text": text, "level": level})):
+                self._send({"type": "log", "text": "❌ 键位配置失败", "level": "error"})
+                self._send({"type": "done", "text": "❌ 键位配置失败"})
+                return
+            self._send({"type": "log", "text": "✅ 键位配置完成", "level": "success"})
 
             # ---- 感知环：先彻底清弹窗 → 检测 enter_game → 验证主界面 ----
             self._send({"type": "log", "text": "启动登录后感知环..."})

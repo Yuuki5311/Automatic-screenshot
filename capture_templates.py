@@ -90,6 +90,9 @@ TEMPLATES = [
     ("settings_logout.png", "设置页「退出登录」", "设置页下方"),
     # ---- 可选 ----
     ("honor_of_kings.png", "先锋页王者荣耀图标", "腾讯先锋游戏列表"),
+    # ---- 键位配置 ----
+    ("keybind_edit.png", "键位编辑按钮", "设置-键位编辑入口"),
+    ("keybind_save.png", "保存键位按钮", "键位编辑页右上角"),
 ]
 
 
