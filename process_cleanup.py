@@ -577,70 +577,28 @@ def _force_kill(driver_pid: int, info: dict) -> None:
 
 
 def _reset_display() -> None:
-    """重新应用当前显示模式，强制 GPU 渲染管线复位。
+    """通过恢复默认显示模式强制 GPU 渲染管线复位。
 
     Edge CDP 自动化密集的截图 + 鼠标注入操作后，DWM/GPU 渲染管
     线可能进入异常状态，表现为脚本结束后鼠标延迟/无响应。
-    重新应用当前显示模式等效于 Win+Ctrl+Shift+B，但不闪烁。
+
+    ChangeDisplaySettingsW(NULL, 0) 使 Windows 恢复到注册表默认
+    显示设置，效果等效 Win+Ctrl+Shift+B 但不闪烁屏幕。
     """
     if platform.system() != "Windows":
         return
     try:
         import ctypes
-        from ctypes import wintypes
 
-        # DEVMODEW 结构体 — 仅定义 EnumDisplaySettings 会写入的关键字段
-        # 实际结构 ~220 字节，用 padding 补齐
-        class _DEVMODEW(ctypes.Structure):
-            _fields_ = [
-                ("dmDeviceName", wintypes.WCHAR * 32),       # offset 0
-                ("dmSpecVersion", wintypes.WORD),            # offset 64
-                ("dmDriverVersion", wintypes.WORD),          # offset 66
-                ("dmSize", wintypes.WORD),                   # offset 68
-                ("dmDriverExtra", wintypes.WORD),            # offset 70
-                ("dmFields", wintypes.DWORD),                # offset 72
-                ("_pad0", ctypes.c_byte * 8),                # position/orientation
-                ("dmColor", wintypes.SHORT),                 # offset 84
-                ("dmDuplex", wintypes.SHORT),
-                ("dmYResolution", wintypes.SHORT),
-                ("dmTTOption", wintypes.SHORT),
-                ("dmCollate", wintypes.SHORT),
-                ("dmFormName", wintypes.WCHAR * 32),
-                ("dmLogPixels", wintypes.WORD),
-                ("dmBitsPerPel", wintypes.DWORD),
-                ("dmPelsWidth", wintypes.DWORD),
-                ("dmPelsHeight", wintypes.DWORD),
-                ("dmDisplayFlags", wintypes.DWORD),
-                ("dmDisplayFrequency", wintypes.DWORD),
-                ("dmICMMethod", wintypes.DWORD),
-                ("dmICMIntent", wintypes.DWORD),
-                ("dmMediaType", wintypes.DWORD),
-                ("dmDitherType", wintypes.DWORD),
-                ("dmReserved1", wintypes.DWORD),
-                ("dmReserved2", wintypes.DWORD),
-                ("dmPanningWidth", wintypes.DWORD),
-                ("dmPanningHeight", wintypes.DWORD),
-            ]
-
-        ENUM_CURRENT_SETTINGS = -1
         user32 = ctypes.windll.user32
-
-        devmode = _DEVMODEW()
-        devmode.dmSize = ctypes.sizeof(_DEVMODEW)
-
-        # 读取当前显示设置
-        if not user32.EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, ctypes.byref(devmode)):
-            log.debug("EnumDisplaySettings 失败，跳过 GPU 重置")
-            return
-
-        # 重新应用 — flags=0 使 Windows 走完整 mode set 管线
-        result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
+        # NULL + 0 = 恢复注册表默认显示模式，强制 GPU mode reset
+        result = user32.ChangeDisplaySettingsW(None, 0)
         if result == 0:  # DISP_CHANGE_SUCCESSFUL
             log.info("GPU 显示管线已重置")
         else:
-            log.debug(f"ChangeDisplaySettings 返回 {result}（非致命）")
+            log.info(f"GPU 显示管线重置返回 {result}（非致命）")
     except Exception:
-        log.debug("GPU 重置失败，跳过", exc_info=True)
+        log.info("GPU 显示管线重置异常（非致命）", exc_info=True)
 
 
 def cleanup_all() -> None:
