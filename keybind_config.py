@@ -4,6 +4,7 @@
 1. 点击键位编辑按钮（模板匹配）
 2. 点击指定坐标（ROI 双重确认，参考 ui_loop.py 中 __coords__ 分支）
 3. 点击保存键位按钮（模板匹配）
+4. 点击"暂不更改"按钮（不存在则跳过）
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ log = get_logger()
 KEYBIND_EDIT_BTN = "keybind_edit.png"
 KEYBIND_SAVE_BTN = "keybind_save.png"
 KEYBIND_POS_TEMPLATE = "keybind_pos_target.png"
+KEYBIND_SKIP_BTN = "keybind_skip.png"  # "暂不更改" 按钮
 
 # ---- calibrated_coords.json 中的坐标 key ----
 KEYBIND_CLICK_COORD_KEY = "keybind_pos"
@@ -134,6 +136,13 @@ def configure_keybinding(nav, on_log: Callable[[str, str], None] | None = None) 
         return False
     _emit(f"已点击保存键位按钮 ({KEYBIND_SAVE_BTN})", "success")
     time.sleep(CLICK_INTERVAL)
+
+    # ---- Step 4: 点击"暂不更改"按钮（不存在则跳过） ----
+    if nav.find_and_click(KEYBIND_SKIP_BTN, timeout=3, max_retries=2, threshold=0.75):
+        _emit(f"已点击暂不更改按钮 ({KEYBIND_SKIP_BTN})", "success")
+        time.sleep(CLICK_INTERVAL)
+    else:
+        _emit(f"未检测到暂不更改按钮 ({KEYBIND_SKIP_BTN})，跳过", "info")
 
     _emit("键位配置完成", "success")
     return True

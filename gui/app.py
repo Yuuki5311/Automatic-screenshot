@@ -304,7 +304,7 @@ class App(tk.Tk):
             _entered_via_fast_path = False
             # 依赖应已在 main 主线程预加载；此处再导入以便开发模式懒加载
             from browser import create_browser
-            from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path, writable_path
+            from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path, writable_path, CLICK_INTERVAL
             from login import web_login, game_login, click_confirm_dialog, manual_login
             from game_launcher import launch_game
             from navigator import Navigator
@@ -441,6 +441,22 @@ class App(tk.Tk):
                 self._send({"type": "log", "text": "等待 10 秒后启动感知环..."})
                 time.sleep(10)
                 _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
+
+                # ---- 阶段 2 前置: 等待 5s → 点击 keybind_pos 坐标 ----
+                self._send({"type": "log", "text": "等待 5 秒后点击 keybind_pos 坐标..."})
+                time.sleep(5)
+                keybind_coords = None
+                try:
+                    with open(resource_path("calibrated_coords.json"), "r") as f:
+                        keybind_coords = json.load(f).get("keybind_pos")
+                except Exception:
+                    pass
+                if keybind_coords:
+                    _nav.click_css(*keybind_coords)
+                    self._send({"type": "log", "text": f"已点击 keybind_pos 坐标 ({keybind_coords[0]}, {keybind_coords[1]})", "level": "success"})
+                    time.sleep(CLICK_INTERVAL)
+                else:
+                    self._send({"type": "log", "text": "⚠️ 未找到 keybind_pos 坐标，跳过", "level": "warn"})
 
                 _entered_via_fast_path = False
                 STAGE2_TIMEOUT = 60

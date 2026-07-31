@@ -18,6 +18,7 @@ from keybind_config import (
     KEYBIND_EDIT_BTN,
     KEYBIND_SAVE_BTN,
     KEYBIND_POS_TEMPLATE,
+    KEYBIND_SKIP_BTN,
     KEYBIND_CLICK_COORD_KEY,
     COORD_SEARCH_MARGIN,
     MAX_RETRIES,
@@ -68,7 +69,7 @@ class TestConfigureKeybinding:
         """构造 mock Navigator。
 
         find_results 控制 find_and_click 返回值顺序：
-        [edit_btn, pos_target, save_btn]
+        [edit_btn, pos_target, save_btn, skip_btn]
         """
         nav = MagicMock()
         nav.viewport_size.return_value = (1920, 1080)
@@ -76,7 +77,7 @@ class TestConfigureKeybinding:
         nav.click_cluster = MagicMock()
 
         if find_results is None:
-            find_results = [True, True, True]  # 全部成功
+            find_results = [True, True, True, False]  # 编辑/坐标/保存成功，跳过按钮不存在（默认）
 
         nav.find_and_click = MagicMock(side_effect=find_results)
         return nav
@@ -84,13 +85,13 @@ class TestConfigureKeybinding:
     @patch("keybind_config._load_keybind_coords")
     @patch("keybind_config.time.sleep", return_value=None)
     def test_success_template_matched(self, mock_sleep, mock_load):
-        """模板匹配命中 → 3 次 find_and_click，不触发坐标回退。"""
+        """模板匹配命中 → 4 次 find_and_click，不触发坐标回退。"""
         mock_load.return_value = (1712, 16)
 
-        nav = self._make_nav(find_results=[True, True, True])
+        nav = self._make_nav(find_results=[True, True, True, True])
         result = configure_keybinding(nav)
         assert result is True
-        assert nav.find_and_click.call_count == 3  # edit + pos_target + save
+        assert nav.find_and_click.call_count == 4  # edit + pos_target + save + skip
         nav.click_css.assert_not_called()  # 模板命中，无回退
 
     @patch("keybind_config._load_keybind_coords")
@@ -99,10 +100,10 @@ class TestConfigureKeybinding:
         """模板未匹配 → 回退 click_css 单点。"""
         mock_load.return_value = (1712, 16)
 
-        nav = self._make_nav(find_results=[True, False, True])
+        nav = self._make_nav(find_results=[True, False, True, False])
         result = configure_keybinding(nav)
         assert result is True
-        assert nav.find_and_click.call_count == 3
+        assert nav.find_and_click.call_count == 4
         nav.click_css.assert_called_once_with(1712, 16)
 
     @patch("keybind_config._load_keybind_coords")
@@ -145,7 +146,7 @@ class TestConfigureKeybinding:
         """坐标在边缘时搜索区夹在视口内。"""
         mock_load.return_value = (30, 20)  # 左上角边缘
 
-        nav = self._make_nav(find_results=[True, True, True])
+        nav = self._make_nav(find_results=[True, True, True, False])
         configure_keybinding(nav)
 
         # 第二次调用 (pos_target) 的 bounds
@@ -164,7 +165,7 @@ class TestConfigureKeybinding:
         """保存按钮搜索应限定在右下 1/4 区域。"""
         mock_load.return_value = (1712, 16)
 
-        nav = self._make_nav(find_results=[True, True, True])
+        nav = self._make_nav(find_results=[True, True, True, False])
         result = configure_keybinding(nav)
         assert result is True
 
@@ -180,7 +181,7 @@ class TestConfigureKeybinding:
         """on_log 回调应被调用。"""
         mock_load.return_value = (1712, 16)
 
-        nav = self._make_nav(find_results=[True, True, True])
+        nav = self._make_nav(find_results=[True, True, True, True])
         logs = []
 
         def capture(text, level="info"):
@@ -190,6 +191,53 @@ class TestConfigureKeybinding:
         assert result is True
         assert len(logs) > 0
         assert any("完成" in text for text, _ in logs)
+
+    # ---- Step 4: "暂不更改"按钮测试 ----
+
+    @patch("keybind_config._load_keybind_coords")
+    @patch("keybind_config.time.sleep", return_value=None)
+    def test_skip_btn_found_and_clicked(self, mock_sleep, mock_load):
+        """Step 4: 暂不更改按钮存在 → 点击并成功返回。"""
+        mock_load.return_value = (1712, 16)
+
+        nav = self._make_nav(find_results=[True, True, True, True])
+        result = configure_keybinding(nav)
+        assert result is True
+        # edit + pos_target + save + skip = 4 次调用
+        assert nav.find_and_click.call_count == 4
+        # 第 4 次调用是 skip 按钮
+        skip_call = nav.find_and_click.call_args_list[3]
+        args, kwargs = skip_call
+        assert args[0] == KEYBIND_SKIP_BTN
+        assert kwargs["timeout"] == 3
+        assert kwargs["max_retries"] == 2
+        assert kwargs["threshold"] == 0.75
+
+    @patch("keybind_config._load_keybind_coords")
+    @patch("keybind_config.time.sleep", return_value=None)
+    def test_skip_btn_not_found_still_succeeds(self, mock_sleep, mock_load):
+        """Step 4: 暂不更改按钮不存在 → 跳过，仍然返回 True。"""
+        mock_load.return_value = (1712, 16)
+
+        nav = self._make_nav(find_results=[True, True, True, False])
+        result = configure_keybinding(nav)
+        assert result is True  # 不阻断！
+        assert nav.find_and_click.call_count == 4
+
+    @patch("keybind_config._load_keybind_coords")
+    @patch("keybind_config.time.sleep", return_value=None)
+    def test_skip_btn_search_is_fullscreen(self, mock_sleep, mock_load):
+        """Step 4: 暂不更改按钮搜索不限定 bounds（全屏搜索）。"""
+        mock_load.return_value = (1712, 16)
+
+        nav = self._make_nav(find_results=[True, True, True, True])
+        result = configure_keybinding(nav)
+        assert result is True
+
+        skip_call = nav.find_and_click.call_args_list[3]
+        _, kwargs = skip_call
+        # 未传 bounds → 全屏搜索
+        assert kwargs.get("bounds") is None
 
 
 class TestClickCluster:
@@ -262,6 +310,7 @@ class TestConstants:
     def test_template_names(self):
         assert KEYBIND_EDIT_BTN == "keybind_edit.png"
         assert KEYBIND_SAVE_BTN == "keybind_save.png"
+        assert KEYBIND_SKIP_BTN == "keybind_skip.png"
 
     def test_coord_key(self):
         assert KEYBIND_CLICK_COORD_KEY == "keybind_pos"
