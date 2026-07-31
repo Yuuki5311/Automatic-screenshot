@@ -21,9 +21,13 @@ log = get_logger()
 # ---- 模板名（换模板只需改这里）----
 KEYBIND_EDIT_BTN = "keybind_edit.png"
 KEYBIND_SAVE_BTN = "keybind_save.png"
+KEYBIND_POS_TEMPLATE = "keybind_pos_target.png"
 
 # ---- calibrated_coords.json 中的坐标 key ----
 KEYBIND_CLICK_COORD_KEY = "keybind_pos"
+
+# ---- 坐标搜索区域半径 (CSS 像素) ----
+COORD_SEARCH_MARGIN = 80
 
 # ---- 重试 ----
 MAX_RETRIES = 3
@@ -81,21 +85,44 @@ def configure_keybinding(nav, on_log: Callable[[str, str], None] | None = None) 
     _emit(f"已点击键位编辑按钮 ({KEYBIND_EDIT_BTN})", "success")
     time.sleep(CLICK_INTERVAL)
 
-    # ---- Step 2: 点击指定坐标（ROI 双重确认） ----
+    # ---- Step 2: 坐标粗定位 + 模板精匹配 + 单次点击 ----
     coords = _load_keybind_coords()
     if coords is None:
         _emit("无法读取键位坐标", "error")
         return False
 
-    from click_confirm import plan_coords_click, execute_click_with_confirm
+    cx, cy = coords
+    vw, vh = nav.viewport_size()
+    margin = COORD_SEARCH_MARGIN
 
-    screen = nav._get_screenshot()
-    x, y = coords
-    plan = plan_coords_click(screen, x, y)
-    if not execute_click_with_confirm(nav, plan):
-        _emit(f"键位坐标点击取消（ROI 未确认）: ({x}, {y})", "error")
-        return False
-    _emit(f"已点击键位坐标 ({x}, {y})", "success")
+    # 以坐标为中心，±margin 搜索区域（夹在视口内）
+    bx = max(0, cx - margin)
+    by = max(0, cy - margin)
+    bw = min(vw, cx + margin) - bx
+    bh = min(vh, cy + margin) - by
+    search_bounds = (bx, by, bw, bh)
+
+    _emit(
+        f"坐标粗定位 ({cx}, {cy}) → 搜索区 {bw}×{bh} @ ({bx},{by})",
+        "info",
+    )
+
+    # 在限定区域内模板匹配 + 点击
+    if nav.find_and_click(
+        KEYBIND_POS_TEMPLATE,
+        timeout=3,
+        max_retries=2,
+        bounds=search_bounds,
+    ):
+        _emit(f"模板匹配命中 → 已点击 ({KEYBIND_POS_TEMPLATE})", "success")
+    else:
+        # 回退：直接用坐标单点点击
+        _emit(
+            f"模板未匹配，回退坐标点击 ({cx}, {cy})",
+            "warn",
+        )
+        nav.click_css(cx, cy)
+
     time.sleep(CLICK_INTERVAL)
 
     # ---- Step 3: 点击保存键位按钮（右下角） ----

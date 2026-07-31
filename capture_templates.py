@@ -93,6 +93,7 @@ TEMPLATES = [
     # ---- 键位配置 ----
     ("keybind_edit.png", "键位编辑按钮", "设置-键位编辑入口"),
     ("keybind_save.png", "保存键位按钮", "键位编辑页右上角"),
+    ("keybind_pos_target.png", "键位布局目标小框", "键位编辑页中间区域"),
 ]
 
 

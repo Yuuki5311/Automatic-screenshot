@@ -140,6 +140,75 @@ class Navigator:
             },
         )
 
+    def click_cluster(
+        self,
+        cx: int,
+        cy: int,
+        radius: int = 4,
+        grid: int = 3,
+        interval_range: tuple[int, int] = (10, 30),
+    ) -> None:
+        """簇击：在 (cx, cy) 周围 grid×grid 网格内各发一次 CDP 点击。
+
+        每次点击之间随机间隔 interval_range[0]~interval_range[1] 毫秒，
+        将单点精确点击扩展为热区打击，解决 UI 元素过小导致命中失败的问题。
+
+        Args:
+            cx, cy: 目标中心坐标（CSS 像素）。
+            radius: 网格半径（像素），默认 ±4px。
+            grid: 网格点数（每边），默认 3 即 3×3=9 点。
+            interval_range: 点击间隔范围（毫秒）。
+        """
+        import random as _random
+        import time as _time
+
+        n = max(2, int(grid))
+        r = max(1, int(radius))
+        lo, hi = int(interval_range[0]), int(interval_range[1])
+
+        offsets: list[tuple[int, int]] = []
+        if n == 1:
+            offsets = [(0, 0)]
+        else:
+            step = (2 * r) // (n - 1) if n > 1 else 1
+            for iy in range(n):
+                dy = -r + iy * step
+                for ix in range(n):
+                    dx = -r + ix * step
+                    offsets.append((int(dx), int(dy)))
+
+        for i, (dx, dy) in enumerate(offsets):
+            x = int(cx) + dx
+            y = int(cy) + dy
+            self.driver.execute_cdp_cmd(
+                "Input.dispatchMouseEvent",
+                {"type": "mouseMoved", "x": x, "y": y},
+            )
+            self.driver.execute_cdp_cmd(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": "mousePressed",
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "buttons": 1,
+                    "clickCount": 1,
+                },
+            )
+            self.driver.execute_cdp_cmd(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": "mouseReleased",
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "buttons": 0,
+                    "clickCount": 1,
+                },
+            )
+            if i < len(offsets) - 1:
+                _time.sleep(_random.randint(lo, hi) / 1000.0)
+
     def grab_roi(self, x: int, y: int, w: int, h: int) -> np.ndarray:
         """截取视口后裁切 ROI（P0：全图再裁；后续可换 CDP clip）。"""
         screen = self._get_screenshot()
