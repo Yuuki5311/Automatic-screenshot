@@ -481,6 +481,34 @@ def _kill_by_name(name: str) -> bool:
         return False
 
 
+def release_browser_locks(driver) -> None:
+    """退出前释放浏览器指针锁定和输入拦截（CDP 级别）。
+
+    云游戏使用 Pointer Lock API 捕获鼠标；CDP 自动化可能设置
+    Input.setIgnoreInputEvents。若在锁定状态下直接杀进程，
+    锁定状态可能残留，表现为主屏鼠标无法点击。
+
+    调用时机：任何 driver.quit() 之前。
+    """
+    if driver is None:
+        return
+    try:
+        driver.execute_cdp_cmd("Runtime.evaluate", {
+            "expression": (
+                "try { document.exitPointerLock(); } catch(e) {}"
+                "try { document.exitFullscreen(); } catch(e) {}"
+            ),
+        })
+        log.debug("已发送 Pointer Lock / Fullscreen 释放指令")
+    except Exception:
+        log.debug("释放 Pointer Lock 失败（浏览器可能已关闭）", exc_info=True)
+    try:
+        driver.execute_cdp_cmd("Input.setIgnoreInputEvents", {"ignore": False})
+        log.debug("已重置 Input.setIgnoreInputEvents")
+    except Exception:
+        pass
+
+
 def _quit_with_timeout(driver, timeout_s: float = 5.0) -> bool:
     """带超时的 driver.quit()。
 
@@ -519,11 +547,16 @@ def _quit_with_timeout(driver, timeout_s: float = 5.0) -> bool:
 def _force_kill(driver_pid: int, info: dict) -> None:
     """对单个 driver 执行三级降级清理。
 
+    Level 0: CDP 释放 Pointer Lock / Fullscreen (防主屏鼠标被锁)
     Level 1: driver.quit() (优雅退出) → 验证进程是否真正退出
     Level 2: 实时扫描整个进程树 → taskkill /F /PID (精确强杀所有子孙)
     Level 3: taskkill /F /IM msedgedriver.exe + msedge.exe (全局兜底)
     """
     driver = info.get("driver")
+
+    # Level 0: 释放浏览器锁定状态（防止残留 Pointer Lock 抢占主屏鼠标）
+    if driver is not None:
+        release_browser_locks(driver)
 
     # Level 1: 优雅退出，然后验证进程是否真正终止
     if driver is not None:
@@ -535,18 +568,34 @@ def _force_kill(driver_pid: int, info: dict) -> None:
         if driver_pid is not None and driver_pid > 0:
             survivors = _find_all_descendant_pids(driver_pid)
             alive = [p for p in survivors if p != driver_pid]
-            if not alive and not _process_exists(driver_pid):
-                log.debug("Level 1 完成，进程已全部退出")
-                return
-            log.warning(
-                f"quit 后仍有 {len(alive)} 个进程存活: {alive}，"
-                f"进入 Level 2"
-            )
+            driver_dead = not _process_exists(driver_pid)
+
+            if not alive and driver_dead:
+                # driver 已退出，进程树扫描显示无残留
+                # 额外兜底：driver PID 死后再从它递归查子进程可能不完整
+                stray = _all_pids_by_name("msedge.exe")
+                if not stray:
+                    log.debug("Level 1 完成，进程已全部退出")
+                    return
+                log.warning(
+                    f"driver 已退出但仍有 {len(stray)} 个 msedge 存活: {stray}，"
+                    f"进程树扫描遗漏，进入 Level 2"
+                )
+            elif alive:
+                log.warning(
+                    f"quit 后仍有 {len(alive)} 个进程存活: {alive}，"
+                    f"进入 Level 2"
+                )
 
     # Level 2: 重新扫描整个进程树并强杀
     # （不依赖注册时的快照——Edge 后续会不断创建新渲染进程）
+    # 注意：若 driver PID 已死，进程树扫描可能遗漏孙进程
     if driver_pid is not None and driver_pid > 0:
         all_pids = _find_all_descendant_pids(driver_pid)
+        # 兜底：driver PID 死后递归扫描不完整，追加镜像名扫描结果
+        for pid in _all_pids_by_name("msedge.exe"):
+            if pid not in all_pids:
+                all_pids.append(pid)
         log.info(f"Level 2: 强杀进程树 root={driver_pid}, pids={all_pids}")
         for pid in all_pids:
             _kill_pid(pid)
@@ -558,6 +607,10 @@ def _force_kill(driver_pid: int, info: dict) -> None:
         # 复查：还有存活的子孙进程吗？
         survivors = _find_all_descendant_pids(driver_pid)
         alive = [p for p in survivors if p != driver_pid]
+        # 同样兜底镜像名扫描
+        for pid in _all_pids_by_name("msedge.exe"):
+            if pid not in alive and pid != driver_pid:
+                alive.append(pid)
         if alive:
             log.warning(f"Level 2 后仍有残留进程: {alive}，进入 Level 3")
         else:
@@ -577,28 +630,77 @@ def _force_kill(driver_pid: int, info: dict) -> None:
 
 
 def _reset_display() -> None:
-    """通过恢复默认显示模式强制 GPU 渲染管线复位。
+    """重新应用当前显示模式，强制 GPU 渲染管线复位。
 
     Edge CDP 自动化密集的截图 + 鼠标注入操作后，DWM/GPU 渲染管
     线可能进入异常状态，表现为脚本结束后鼠标延迟/无响应。
-
-    ChangeDisplaySettingsW(NULL, 0) 使 Windows 恢复到注册表默认
-    显示设置，效果等效 Win+Ctrl+Shift+B 但不闪烁屏幕。
+    读取当前显示设置并重新应用，不改变分辨率/刷新率等任何设置，
+    效果等效 Win+Ctrl+Shift+B 但不闪烁。
     """
     if platform.system() != "Windows":
         return
     try:
         import ctypes
+        from ctypes import wintypes
 
+        # DEVMODEW 结构体 — offset 76 的 union 跨 16 字节（非 8），
+        # 必须正确定义，否则 EnumDisplaySettings 写入的 dmPelsWidth /
+        # dmPelsHeight / dmDisplayFrequency 等字段会被错误读取。
+        class POINTL(ctypes.Structure):
+            _fields_ = [
+                ("x", wintypes.LONG),
+                ("y", wintypes.LONG),
+            ]
+
+        class _DISPLAY_UNION(ctypes.Structure):
+            _fields_ = [
+                ("dmPosition", POINTL),                    # 8 bytes
+                ("dmDisplayOrientation", wintypes.DWORD),  # 4 bytes
+                ("dmDisplayFixedOutput", wintypes.DWORD),  # 4 bytes
+            ]  # total: 16 bytes
+
+        class _DEVMODEW(ctypes.Structure):
+            _fields_ = [
+                ("dmDeviceName", wintypes.WCHAR * 32),       # offset 0
+                ("dmSpecVersion", wintypes.WORD),            # offset 64
+                ("dmDriverVersion", wintypes.WORD),          # offset 66
+                ("dmSize", wintypes.WORD),                   # offset 68
+                ("dmDriverExtra", wintypes.WORD),            # offset 70
+                ("dmFields", wintypes.DWORD),                # offset 72
+                ("_display", _DISPLAY_UNION),                # offset 76, 16 bytes
+                ("dmColor", wintypes.SHORT),                 # offset 92
+                ("dmDuplex", wintypes.SHORT),
+                ("dmYResolution", wintypes.SHORT),
+                ("dmTTOption", wintypes.SHORT),
+                ("dmCollate", wintypes.SHORT),
+                ("dmFormName", wintypes.WCHAR * 32),
+                ("dmLogPixels", wintypes.WORD),
+                ("dmBitsPerPel", wintypes.DWORD),
+                ("dmPelsWidth", wintypes.DWORD),
+                ("dmPelsHeight", wintypes.DWORD),
+                ("dmDisplayFlags", wintypes.DWORD),
+                ("dmDisplayFrequency", wintypes.DWORD),
+            ]
+
+        ENUM_CURRENT_SETTINGS = -1
         user32 = ctypes.windll.user32
-        # NULL + 0 = 恢复注册表默认显示模式，强制 GPU mode reset
-        result = user32.ChangeDisplaySettingsW(None, 0)
+
+        devmode = _DEVMODEW()
+        devmode.dmSize = ctypes.sizeof(_DEVMODEW)
+
+        # 读取当前显示设置
+        if not user32.EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, ctypes.byref(devmode)):
+            log.debug("EnumDisplaySettings 失败，跳过 GPU 重置")
+            return
+
+        # 重新应用当前设置 — flags=0 走完整 mode set 管线但不修改任何值
+        result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
         if result == 0:  # DISP_CHANGE_SUCCESSFUL
             log.info("GPU 显示管线已重置")
         else:
-            log.info(f"GPU 显示管线重置返回 {result}（非致命）")
+            log.debug(f"ChangeDisplaySettings 返回 {result}（非致命）")
     except Exception:
-        log.info("GPU 显示管线重置异常（非致命）", exc_info=True)
+        log.debug("GPU 重置失败，跳过", exc_info=True)
 
 
 def cleanup_all() -> None:

@@ -138,7 +138,10 @@ def configure_keybinding(nav, on_log: Callable[[str, str], None] | None = None) 
     time.sleep(CLICK_INTERVAL)
 
     # ---- Step 4: 点击"暂不更改"按钮（不存在则跳过） ----
-    if nav.find_and_click(KEYBIND_SKIP_BTN, timeout=3, max_retries=2, threshold=0.75):
+    # 只在下半屏搜索（弹窗出现在画面下半区域）
+    vw, vh = nav.viewport_size()
+    skip_bounds = (0, vh // 2, vw, vh - vh // 2)
+    if nav.find_and_click(KEYBIND_SKIP_BTN, timeout=3, max_retries=2, threshold=0.55, bounds=skip_bounds):
         _emit(f"已点击暂不更改按钮 ({KEYBIND_SKIP_BTN})", "success")
         time.sleep(CLICK_INTERVAL)
     else:

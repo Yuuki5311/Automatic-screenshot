@@ -908,15 +908,38 @@ class App(tk.Tk):
                 _nav.cleanup()
             if nav is not None:
                 nav.cleanup()
-            # 兜底：确保浏览器已关闭
+            # 兜底：确保浏览器已关闭且不残留鼠标锁定
             if driver is not None:
+                import process_cleanup
+
+                # 0. 释放浏览器锁定状态（Pointer Lock / Fullscreen）
+                #    必须在 quit 之前执行，否则 CDP 连接断开后无法释放
+                process_cleanup.release_browser_locks(driver)
+
+                # 1. 优雅退出
                 try:
                     driver.quit()
                 except Exception:
                     pass
-                # quit 后移出追踪（无论成功失败都移出，失败由 cleanup_all 兜底）
-                import process_cleanup
-                process_cleanup.unregister_driver(driver)
+
+                # 2. 等待并验证进程真正退出后再移出追踪
+                #    quit() 返回只说明 HTTP 请求已发送，子进程退出需要时间
+                #    若 driver 还活着，留在 _drivers 中让 cleanup_all 做三级强杀
+                time.sleep(1.5)
+                try:
+                    driver_pid = driver.service.process.pid
+                    if driver_pid and not process_cleanup._process_exists(driver_pid):
+                        # 进程已确认退出 → 安全移出追踪
+                        process_cleanup.unregister_driver(driver)
+                    else:
+                        # 进程仍存活 → 留给 cleanup_all / atexit 的三级降级处理
+                        _log.warning(
+                            f"driver.quit() 后 driver PID {driver_pid} 仍存活，"
+                            f"交由 cleanup_all 强杀"
+                        )
+                except Exception:
+                    # 无法获取 PID 时保守移出（driver 大概率已不可用）
+                    process_cleanup.unregister_driver(driver)
                 driver = None
             self._driver = None
 
