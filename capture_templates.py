@@ -98,13 +98,9 @@ TEMPLATES = [
 
 
 def grab_viewport_bgr(driver) -> np.ndarray:
-    """与 Navigator 相同：Selenium PNG → BGR。"""
-    png = driver.get_screenshot_as_png()
-    arr = np.frombuffer(png, dtype=np.uint8)
-    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise RuntimeError("无法解码浏览器截图")
-    return bgr
+    """与 Navigator 同源：CDP JPEG（与感知环匹配同一画质）。"""
+    from navigator import capture_viewport_bgr as _cap
+    return _cap(driver)
 
 
 def list_tabs(driver) -> list[tuple[str, str, str]]:

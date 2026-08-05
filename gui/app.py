@@ -748,7 +748,7 @@ class App(tk.Tk):
                 ], 0),
                 ("万象图鉴首页", [
                     ("tab_illustrated.png", "点击图鉴标签"),
-                    ("__optional__", "congrats_popup.png", _avatar_xy, "恭贺弹窗"),
+                    ("__guard__", "back_arrow.png", _avatar_xy, "返回箭头守卫"),
                     ("universal_illustrated.png", "点击万象图鉴"),
                 ], 0),
                 ("万象图鉴-灵宝", [

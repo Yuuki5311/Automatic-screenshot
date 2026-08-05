@@ -855,6 +855,30 @@ class TestScreenshotClickGuard:
         nxt = ("__coords__", "小兵", (1, 2), "back_arrow.png")
         assert effect_verify_template(nxt) == "back_arrow.png"
 
+    def test_effect_verify_optional_returns_none(self):
+        """__optional__ 弹窗不一定出现，不应作为验证模板。"""
+        from screenshot_click import effect_verify_template
+
+        nxt = ("__optional__", "congrats_popup.png", (100, 200), "恭贺弹窗")
+        assert effect_verify_template(nxt) is None
+
+    def test_parse_guard_item(self):
+        """__guard__ 守卫步骤：模板=__guard__，desc=检测模板，bounds=点击坐标。"""
+        from screenshot_click import parse_click_item
+
+        p = parse_click_item(("__guard__", "back_arrow.png", (138, 48), "返回箭头守卫"))
+        assert p["template"] == "__guard__"
+        assert p["desc"] == "back_arrow.png"
+        assert p["bounds"] == (138, 48)
+        assert p["anchor"] == "返回箭头守卫"
+
+    def test_effect_verify_guard_returns_none(self):
+        """__guard__ 守卫步骤不强制验证，直接进入下一步。"""
+        from screenshot_click import effect_verify_template
+
+        nxt = ("__guard__", "back_arrow.png", (138, 48), "返回箭头守卫")
+        assert effect_verify_template(nxt) is None
+
 
 # ========== 截图任务配置测试 ==========
 
@@ -1446,6 +1470,69 @@ class TestUiLoopRun:
         nav.find_and_click.assert_not_called()
         assert loop.goal.click_index == 0
 
+    def test_guard_click_when_template_not_found(self):
+        """__guard__ 未检测到守护模板 → 应点击坐标关闭。"""
+        from ui_loop import UiLoop
+        from click_confirm import ClickPlan
+        import numpy as np
+
+        nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((50, 50, 3), dtype=np.uint8)
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[("万象图鉴首页", [
+                ("tab_illustrated.png", "d"),
+                ("__guard__", "back_arrow.png", (138, 48), "返回箭头守卫"),
+                ("universal_illustrated.png", "d"),
+            ], 0)],
+            tick_s=0,
+        )
+        loop.goal.click_index = 1
+        with patch("ui_loop.time.sleep", return_value=None), \
+             patch.object(loop, "_ensure_clear_for_click", return_value=True), \
+             patch("click_confirm.plan_template_click", return_value=None):  # 未匹配到 back_arrow
+            loop._do_click_step()
+
+        # 未匹配到守护模板，应点击坐标
+        nav.click_css.assert_called_once_with(138, 48)
+        assert loop.goal.click_index == 2
+
+    def test_guard_skip_when_template_found(self):
+        """__guard__ 检测到守护模板 → 应跳过，不点击。"""
+        from ui_loop import UiLoop
+        from click_confirm import ClickPlan
+        import numpy as np
+
+        nav = Mock()
+        nav._get_screenshot.return_value = np.zeros((50, 50, 3), dtype=np.uint8)
+        loop = UiLoop(
+            nav=nav,
+            shot=Mock(),
+            tasks=[("万象图鉴首页", [
+                ("tab_illustrated.png", "d"),
+                ("__guard__", "back_arrow.png", (138, 48), "返回箭头守卫"),
+                ("universal_illustrated.png", "d"),
+            ], 0)],
+            tick_s=0,
+        )
+        loop.goal.click_index = 1
+        fake_plan = ClickPlan(
+            x=200, y=60,
+            roi_ref=np.zeros((20, 20, 3), dtype=np.uint8),
+            template_name="back_arrow.png",
+            score=0.95,
+            roi_box=(180, 40, 40, 40),
+        )
+        with patch("ui_loop.time.sleep", return_value=None), \
+             patch.object(loop, "_ensure_clear_for_click", return_value=True), \
+             patch("click_confirm.plan_template_click", return_value=fake_plan):  # 匹配到 back_arrow
+            loop._do_click_step()
+
+        # 匹配到守护模板，不应点击坐标
+        nav.click_css.assert_not_called()
+        assert loop.goal.click_index == 2
+
     def test_do_back_skips_when_popup_pending(self):
         from ui_loop import UiLoop
 
@@ -1523,6 +1610,28 @@ class TestUiLoopRun:
         assert g.click_index == 0
         assert g.success == 0
         assert not getattr(g, "_shot_done", False)
+
+    def test_path_templates_includes_guard_template(self):
+        """__guard__ 的 desc 模板应包含在 path_templates 中以供 ON_PATH 探测。"""
+        from ui_loop import Goal
+
+        g = Goal([
+            ("万象图鉴首页", [
+                ("tab_illustrated.png", "点击图鉴标签"),
+                ("__guard__", "back_arrow.png", (138, 48), "返回箭头守卫"),
+                ("universal_illustrated.png", "点击万象图鉴"),
+            ], 0),
+        ])
+        # 第一步：普通模板
+        assert g.path_templates() == ["tab_illustrated.png"]
+
+        # 第二步：__guard__ 应返回 desc 中的检测模板
+        g.click_index = 1
+        assert g.path_templates() == ["back_arrow.png"]
+
+        # 第三步：普通模板
+        g.click_index = 2
+        assert g.path_templates() == ["universal_illustrated.png"]
 
     def test_do_back_advances_when_verify_ok(self):
         from ui_loop import UiLoop
@@ -1710,3 +1819,103 @@ if __name__ == "__main__":
     else:
         print(f"{failed} 个测试失败 ❌")
         sys.exit(1)
+
+
+# ========== 点头像关闭弹窗（省电模式等）测试 ==========
+
+class TestDismissByAvatarPopup:
+    """检测到特定弹窗后通过点击头像坐标关闭。"""
+
+    def test_avatar_dismiss_hits_coords_when_matched(self):
+        """检测到 popup_power_saving.png 且有头像坐标 → 点头像关闭。"""
+        from ui_loop import close_perception_popup
+        from ui_state import (
+            POPUP_DISMISS_BY_AVATAR_TEMPLATES,
+            POPUP_DISMISS_BY_AVATAR_THRESHOLD,
+        )
+
+        nav = Mock()
+        nav._load_template.return_value = np.zeros((30, 30, 3), dtype=np.uint8)
+        nav._get_screenshot.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        # 让 match_score 返回高于阈值的分数
+        with patch("ui_state.match_score", return_value=0.85):
+            result = close_perception_popup(
+                nav, on_log=lambda text, level="info": None,
+                avatar_coords=(379, 249),
+            )
+        assert result == POPUP_DISMISS_BY_AVATAR_TEMPLATES[0]
+        nav.click_css.assert_called_once_with(379, 249)
+
+    def test_avatar_dismiss_skips_when_no_coords(self):
+        """检测到模板但没有头像坐标 → 跳过，不打日志报错。"""
+        from ui_loop import close_perception_popup
+
+        nav = Mock()
+        nav._load_template.return_value = np.zeros((30, 30, 3), dtype=np.uint8)
+        nav._get_screenshot.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        # 只让 avatar_dismiss 模板命中，其余模板返回低分
+        def _fake_match(n, tpl, **kw):
+            if tpl == "popup_power_saving.png":
+                return 0.85
+            return -1.0
+
+        logs = []
+        with patch("ui_state.match_score", side_effect=_fake_match):
+            result = close_perception_popup(
+                nav, on_log=lambda text, level="info": logs.append((text, level)),
+                avatar_coords=None,
+            )
+        assert result is None  # 无 avatar_coords，不算成功关闭
+        nav.click_css.assert_not_called()
+
+    def test_avatar_dismiss_not_triggered_below_threshold(self):
+        """匹配分数低于阈值 → 不触发，继续后续检测。"""
+        from ui_loop import close_perception_popup
+
+        nav = Mock()
+        nav._load_template.return_value = np.zeros((30, 30, 3), dtype=np.uint8)
+        nav._get_screenshot.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        # 只让 avatar_dismiss 模板低分（低于阈值），其余模板也低分
+        def _fake_match(n, tpl, **kw):
+            return 0.30  # 全部低于阈值
+
+        with patch("ui_state.match_score", side_effect=_fake_match):
+            result = close_perception_popup(
+                nav, on_log=lambda text, level="info": None,
+                avatar_coords=None,  # 去掉兜底头像坐标
+            )
+        # 没有命中任何弹窗
+        assert result is None
+        nav.click_css.assert_not_called()
+
+    def test_avatar_dismiss_priority_over_close_button(self):
+        """点头像关闭弹窗检测优先级高于 X 关闭按钮。"""
+        from ui_loop import close_perception_popup
+        from ui_state import (
+            POPUP_DISMISS_BY_AVATAR_TEMPLATES,
+            POPUP_CLOSE_THRESHOLD,
+        )
+
+        nav = Mock()
+        nav._load_template.return_value = np.zeros((30, 30, 3), dtype=np.uint8)
+        nav._get_screenshot.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        # 两种模板分数字母都高于阈值，但 avatar_dismiss 应优先命中
+        scores = {}
+        for tpl in POPUP_DISMISS_BY_AVATAR_TEMPLATES:
+            scores[tpl] = 0.85
+        scores["popup_close.png"] = 0.85
+
+        def _fake_match(n, tpl, **kw):
+            return scores.get(tpl, -1.0)
+
+        with patch("ui_state.match_score", side_effect=_fake_match):
+            result = close_perception_popup(
+                nav, on_log=lambda text, level="info": None,
+                avatar_coords=(379, 249),
+            )
+        assert result in POPUP_DISMISS_BY_AVATAR_TEMPLATES
+        nav.click_css.assert_called_once()  # 点头像，非 find_and_click

@@ -15,6 +15,8 @@ from ui_state import (
     POPUP_CLOSE_TEMPLATES,
     POPUP_CLOSE_THRESHOLD,
     POPUP_CONFIRM_TEMPLATES,
+    POPUP_DISMISS_BY_AVATAR_TEMPLATES,
+    POPUP_DISMISS_BY_AVATAR_THRESHOLD,
     CONFIRM_THRESHOLD,
     UiState,
     classify,
@@ -78,6 +80,20 @@ def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None
     vh, vw = screen.shape[:2]
     close_bounds = popup_close_bounds(vw, vh)
     confirm_bounds_val = bottom_half_bounds(vw, vh)
+
+    # 上半屏搜索区（省电模式弹窗位置）
+    upper_bounds = (0, 0, vw, vh // 2)
+
+    # 检测"点头像关闭"类弹窗（如省电模式）→ 点头像坐标关闭
+    for tpl in POPUP_DISMISS_BY_AVATAR_TEMPLATES:
+        if match_score(nav, tpl, bounds=upper_bounds, screen=screen) >= POPUP_DISMISS_BY_AVATAR_THRESHOLD:
+            if avatar_coords is not None:
+                nav.click_css(*avatar_coords)
+                _emit(f"检测到 {tpl}，点击头像坐标关闭", "success")
+                time.sleep(CLICK_INTERVAL)
+                return tpl
+            else:
+                _emit(f"检测到 {tpl} 但无头像坐标，跳过", "warn")
 
     # 快速检测弹窗 X 按钮 → 确认存在后才用 find_and_click
     for tpl in POPUP_CLOSE_TEMPLATES:
@@ -335,6 +351,9 @@ class Goal:
                 return [parsed["anchor"]] if parsed["anchor"] else []
             if parsed["template"] == "__optional__":
                 # __optional__ 的实际模板存在 desc 字段中
+                return [parsed["desc"]] if parsed["desc"].endswith(".png") else []
+            if parsed["template"] == "__guard__":
+                # __guard__ 的检测模板存在 desc 字段中
                 return [parsed["desc"]] if parsed["desc"].endswith(".png") else []
             return [parsed["template"]]
         if self.phase_need_back():
@@ -664,6 +683,24 @@ class UiLoop:
                     time.sleep(CLICK_INTERVAL)
                 else:
                     self._log(f"  未检测到 {popup_tpl}，跳过")
+                self.goal.advance_after_click()
+                return
+            elif template == "__guard__":
+                # 守卫步骤：检测 guard_tpl，若不存在则点击坐标，存在则跳过
+                guard_tpl = desc
+                guard_xy = bounds
+                plan = plan_template_click(self.nav, screen, guard_tpl, threshold=0.7)
+                if plan is None:
+                    self._log(
+                        f"  未检测到 {guard_tpl}，点击坐标 "
+                        f"({guard_xy[0]}, {guard_xy[1]}) 关闭"
+                    )
+                    self.nav.click_css(*guard_xy)
+                    time.sleep(CLICK_INTERVAL)
+                else:
+                    self._log(
+                        f"  检测到 {guard_tpl} (置信度 {plan.score:.2f})，跳过"
+                    )
                 self.goal.advance_after_click()
                 return
             else:

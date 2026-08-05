@@ -34,10 +34,19 @@ def parse_click_item(item: tuple) -> dict[str, Any]:
             "anchor": None,
             "verify_timeout": None,
         }
-    template, desc = item
+    if len(item) == 2:
+        template, desc = item
+        return {
+            "template": template,
+            "desc": desc,
+            "bounds": None,
+            "anchor": None,
+            "verify_timeout": None,
+        }
+    # __guard__ / __optional__ 等特殊类型可能只传 1 个元素占位
     return {
-        "template": template,
-        "desc": desc,
+        "template": item[0] if len(item) >= 1 else "",
+        "desc": "",
         "bounds": None,
         "anchor": None,
         "verify_timeout": None,
@@ -50,13 +59,13 @@ def effect_verify_template(next_item: tuple | None) -> str | None:
     - 无下一步（本任务最后一击）→ None（不强制验证）
     - 下一步是普通模板 → 等该模板出现
     - 下一步是坐标点击 → 用其 anchor（若有）
-    - 下一步是可选弹窗 → 用其实际模板名（desc 字段）
+    - 下一步是可选弹窗 → 返回 None（弹窗不一定出现，不强制验证）
     """
     if next_item is None:
         return None
     parsed = parse_click_item(next_item)
     if parsed["template"] == "__coords__":
         return parsed["anchor"]
-    if parsed["template"] == "__optional__":
-        return parsed["desc"]
+    if parsed["template"] in ("__optional__", "__guard__"):
+        return None  # 可选弹窗/守卫步骤不强制验证，直接进入下一步
     return parsed["template"]

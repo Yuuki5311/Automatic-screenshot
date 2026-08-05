@@ -9,6 +9,12 @@ from logger import get_logger
 
 log = get_logger()
 
+# 检测到后通过点头像坐标关闭的弹窗（如省电模式）
+POPUP_DISMISS_BY_AVATAR_TEMPLATES = (
+    "popup_power_saving.png",
+)
+POPUP_DISMISS_BY_AVATAR_THRESHOLD = 0.53
+
 # 与弹窗关闭按钮匹配共用（云游戏压缩下 0.85 易漏检）
 POPUP_CLOSE_THRESHOLD = 0.78
 POPUP_CLOSE_TEMPLATES = (
