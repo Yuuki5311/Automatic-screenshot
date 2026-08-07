@@ -990,7 +990,7 @@ class TestUiClassify:
 
         state, _ = classify_from_scores({
             "game_qq_android.png": 0.90,
-            "avatar.png": 0.95,
+            "customize_icon.png": 0.95,
         })
         assert state == UiState.MAIN
 
@@ -999,14 +999,14 @@ class TestUiClassify:
 
         state, _ = classify_from_scores({
             "game_qq_android.png": 0.65,
-            "avatar.png": 0.40,
+            "customize_icon.png": 0.40,
         })
         assert state == UiState.UNKNOWN
 
-    def test_main_when_avatar_only(self):
+    def test_main_when_main_only(self):
         from ui_state import UiState, classify_from_scores
 
-        state, _ = classify_from_scores({"avatar.png": 0.90})
+        state, _ = classify_from_scores({"customize_icon.png": 0.90})
         assert state == UiState.MAIN
 
     def test_on_path_when_path_template_hits(self):

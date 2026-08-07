@@ -34,7 +34,7 @@ LOGIN_TEMPLATES = (
     "game_qq_android.png",
 )
 
-MAIN_TEMPLATE = "avatar.png"
+MAIN_TEMPLATE = "customize_icon.png"
 MAIN_THRESHOLD = 0.53
 # 平台登录图在大厅易误匹配；真登录页通常 >0.90，门槛提高到 0.80
 LOGIN_THRESHOLD = 0.80
@@ -174,15 +174,15 @@ def classify(
         screen = nav._get_screenshot()
     vh, vw = screen.shape[:2]
     popup_bounds = popup_close_bounds(vw, vh)
-    av_bounds = avatar_bounds(vw, vh)
+
+    from login import bottom_half_bounds
+
+    main_bounds = bottom_half_bounds(vw, vh)  # game_main.png 在下半屏
+    confirm_bounds = main_bounds
 
     scores: dict[str, float] = {}
     for tpl in POPUP_CLOSE_TEMPLATES:
         scores[tpl] = match_score(nav, tpl, bounds=popup_bounds, screen=screen)
-
-    from login import bottom_half_bounds
-
-    confirm_bounds = bottom_half_bounds(vw, vh)
     for tpl in POPUP_CONFIRM_TEMPLATES:
         scores[tpl] = match_score(nav, tpl, bounds=confirm_bounds, screen=screen)
 
@@ -190,7 +190,7 @@ def classify(
         scores[tpl] = match_score(nav, tpl, screen=screen)
 
     scores[MAIN_TEMPLATE] = match_score(
-        nav, MAIN_TEMPLATE, bounds=av_bounds, screen=screen
+        nav, MAIN_TEMPLATE, bounds=main_bounds, screen=screen
     )
 
     for tpl in path_templates:
