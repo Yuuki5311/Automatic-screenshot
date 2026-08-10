@@ -8,7 +8,7 @@ import time
 import threading
 
 from logger import get_logger
-from ui_state import POPUP_CLOSE_TEMPLATES, POPUP_CLOSE_THRESHOLD, popup_close_bounds
+from ui_state import POPUP_CLOSE_TEMPLATES, POPUP_CLOSE_THRESHOLD, popup_close_bounds, _popup_close_threshold
 
 log = get_logger()
 
@@ -57,9 +57,10 @@ class PopupMonitor:
         labels = {
             "popup_close.png": "X按钮",
             "popup_close_small.png": "小弹窗X按钮",
+            "popup_close_xxx.png": "xxx弹窗X按钮",
         }
         return [
-            (template, bounds, labels.get(template, template), self.CLOSE_THRESHOLD)
+            (template, bounds, labels.get(template, template), _popup_close_threshold(template))
             for template in POPUP_CLOSE_TEMPLATES
         ]
 

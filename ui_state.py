@@ -20,7 +20,16 @@ POPUP_CLOSE_THRESHOLD = 0.78
 POPUP_CLOSE_TEMPLATES = (
     "popup_close.png",
     "popup_close_small.png",
+    "popup_close_xxx.png",
 )
+# 单模板自定义阈值；未列出的模板使用 POPUP_CLOSE_THRESHOLD
+POPUP_CLOSE_THRESHOLD_MAP = {
+    "popup_close_xxx.png": 0.60,
+}
+
+
+def _popup_close_threshold(template: str) -> float:
+    return POPUP_CLOSE_THRESHOLD_MAP.get(template, POPUP_CLOSE_THRESHOLD)
 # 确认类弹窗「确定」（下半屏）；感知环默认当作弹窗关闭
 POPUP_CONFIRM_TEMPLATES = (
     "game_popup_confirm.png",
@@ -90,10 +99,10 @@ def classify_from_scores(
     path_templates = path_templates or []
     info: dict[str, Any] = {"scores": dict(scores)}
 
-    popup_score = _best(scores, POPUP_CLOSE_TEMPLATES)
-    if popup_score >= POPUP_CLOSE_THRESHOLD:
-        info["hit"] = "popup"
-        return UiState.POPUP, info
+    for tpl in POPUP_CLOSE_TEMPLATES:
+        if scores.get(tpl, -1.0) >= _popup_close_threshold(tpl):
+            info["hit"] = "popup"
+            return UiState.POPUP, info
 
     confirm_score = _best(scores, POPUP_CONFIRM_TEMPLATES)
     if confirm_score < 0:

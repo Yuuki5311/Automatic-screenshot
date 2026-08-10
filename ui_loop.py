@@ -21,6 +21,7 @@ from ui_state import (
     UiState,
     classify,
     popup_close_bounds,
+    _popup_close_threshold,
 )
 
 log = get_logger()
@@ -97,12 +98,13 @@ def close_perception_popup(nav, on_log: Callable[[str, str], None] | None = None
 
     # 快速检测弹窗 X 按钮 → 确认存在后才用 find_and_click
     for tpl in POPUP_CLOSE_TEMPLATES:
-        if match_score(nav, tpl, bounds=close_bounds, screen=screen) >= POPUP_CLOSE_THRESHOLD:
+        tpl_th = _popup_close_threshold(tpl)
+        if match_score(nav, tpl, bounds=close_bounds, screen=screen) >= tpl_th:
             if nav.find_and_click(
                 tpl,
                 timeout=2,
                 bounds=close_bounds,
-                threshold=POPUP_CLOSE_THRESHOLD,
+                threshold=tpl_th,
                 allow_fallback=False,
             ):
                 _emit(f"已关闭弹窗 ({tpl})", "success")
@@ -591,7 +593,7 @@ class UiLoop:
         vh, vw = screen.shape[:2]
         bounds = popup_close_bounds(vw, vh)
         for tpl in POPUP_CLOSE_TEMPLATES:
-            if match_score(self.nav, tpl, bounds=bounds, screen=screen) >= POPUP_CLOSE_THRESHOLD:
+            if match_score(self.nav, tpl, bounds=bounds, screen=screen) >= _popup_close_threshold(tpl):
                 return True
         confirm_bounds = bottom_half_bounds(vw, vh)
         for tpl in POPUP_CONFIRM_TEMPLATES:

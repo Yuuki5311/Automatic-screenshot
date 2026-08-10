@@ -583,7 +583,7 @@ class TestPopupSafety:
 
         nav = Mock()
         nav.viewport_size.return_value = (2560, 1440)
-        nav.wait_for_template.side_effect = [False, False]
+        nav.wait_for_template.side_effect = [False, False, False]
         monitor = PopupMonitor(navigator=nav)
 
         assert monitor._do_scan() is False
@@ -591,9 +591,11 @@ class TestPopupSafety:
         close_bounds = (1280, 0, 1280, 720)  # 右上半屏
         assert [
             call.args[0] for call in nav.wait_for_template.call_args_list
-        ] == ["popup_close.png", "popup_close_small.png"]
-        for call in nav.wait_for_template.call_args_list:
-            assert call.kwargs["threshold"] == 0.78
+        ] == ["popup_close.png", "popup_close_small.png", "popup_close_xxx.png"]
+        # 前两个模板阈值 0.78，第三个 0.60
+        expected_thresholds = [0.78, 0.78, 0.60]
+        for i, call in enumerate(nav.wait_for_template.call_args_list):
+            assert call.kwargs["threshold"] == expected_thresholds[i]
             assert call.kwargs["bounds"] == close_bounds
         nav.viewport_size.assert_called()
 
