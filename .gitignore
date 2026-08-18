@@ -28,4 +28,4 @@ debug_*.png
 # Agent 隔离工作区与进度记录
 .worktrees/
 .superpowers/
-.claude/worktrees/
+.claude/

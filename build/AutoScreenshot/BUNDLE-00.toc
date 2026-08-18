@@ -1,3 +1,0 @@
-([('AutoScreenshot',
-   '/Users/l/Desktop/Automatic-screenshot/dist/AutoScreenshot',
-   'EXECUTABLE')],)
