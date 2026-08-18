@@ -24,7 +24,7 @@ POPUP_CLOSE_TEMPLATES = (
 )
 # 单模板自定义阈值；未列出的模板使用 POPUP_CLOSE_THRESHOLD
 POPUP_CLOSE_THRESHOLD_MAP = {
-    "popup_close_xxx.png": 0.60,
+    "popup_close_xxx.png": 0.70,
 }
 
 

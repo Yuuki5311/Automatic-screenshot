@@ -592,8 +592,8 @@ class TestPopupSafety:
         assert [
             call.args[0] for call in nav.wait_for_template.call_args_list
         ] == ["popup_close.png", "popup_close_small.png", "popup_close_xxx.png"]
-        # 前两个模板阈值 0.78，第三个 0.60
-        expected_thresholds = [0.78, 0.78, 0.60]
+        # 前两个模板阈值 0.78，第三个 0.70
+        expected_thresholds = [0.78, 0.78, 0.70]
         for i, call in enumerate(nav.wait_for_template.call_args_list):
             assert call.kwargs["threshold"] == expected_thresholds[i]
             assert call.kwargs["bounds"] == close_bounds
